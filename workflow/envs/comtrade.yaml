@@ -1,0 +1,13 @@
+channels:
+  - conda-forge
+dependencies:
+  - python =3.12
+  - polars =1.33.1
+  - pandas =2.2.*          # comtradeapicall renvoie des DataFrames pandas
+  - urllib3 =2.2.*
+  - pyyaml
+  - pip
+  - pip:
+      # 1.3.2 (2026-06-11) : apporte getCountFinalData / previewCountFinalData.
+      # Ne pas revenir à 1.2.1 (2024-04-19), utilisée par trade_network_analysis.
+      - comtradeapicall ==1.3.2

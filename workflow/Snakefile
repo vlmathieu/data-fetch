@@ -1,0 +1,67 @@
+"""data-fetch — téléchargements de données datés et tracés.
+
+Source présente : UN Comtrade. Le repo est fait pour en accueillir d'autres :
+une source = un fichier de règles + un bloc de config, sans toucher aux autres.
+"""
+
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from snakemake.utils import min_version
+
+min_version("8.16.0")
+
+configfile: "config/config.yaml"
+
+# Pas de directive `envvars` ici, volontairement. Elle ferait échouer TOUT le
+# workflow quand comtrade_apikey est absente, y compris le pré-vol — alors que
+# le pré-vol passe par les endpoints publics et n'a besoin d'aucune clé. La clé
+# est lue dans comtrade_download.py, et nulle part ailleurs.
+
+sys.path.insert(0, str(Path(workflow.basedir) / "scripts"))
+from comtrade_common import resolve_params, params_hash, stem
+
+CT = config["comtrade"]
+PARAMS = resolve_params(CT)
+HASH = params_hash(PARAMS)
+
+# Identifiant de tirage. Omis, il vaut l'horodatage courant : chaque appel
+# produit donc un nouveau fichier, et rien n'est jamais écrasé.
+#   snakemake                                   -> nouveau tirage
+#   snakemake --config run_id=20261024T143000   -> cible un tirage existant,
+#                                                  donc reproductible, et les
+#                                                  règles en aval sont sautées
+RUN_ID = str(config.get("run_id") or datetime.now().strftime("%Y%m%dT%H%M%S"))
+STEM = stem(PARAMS, RUN_ID)
+
+OUT = "data/comtrade"
+
+FORMATS = [f.lower() for f in CT.get("format", ["parquet"])]
+if "parquet" not in FORMATS:
+    # Artefact canonique : types intacts, et seul format lu en interne (le
+    # miroir part du parquet, jamais du CSV).
+    FORMATS.insert(0, "parquet")
+
+CSV_SEP = str(CT.get("csv_sep", ","))
+
+include: "rules/comtrade.smk"
+
+
+def targets():
+    out = [f"{OUT}/{STEM}.{fmt}" for fmt in FORMATS]
+    out.append(f"{OUT}/{STEM}.meta.json")
+    if CT.get("mirror"):
+        out += [f"{OUT}/{STEM}.mirror.{fmt}" for fmt in FORMATS]
+    return out
+
+
+rule all:
+    input:
+        targets()
+
+
+rule preflight:
+    """Cible courte : `snakemake preflight` chiffre le tirage sans rien télécharger."""
+    input:
+        f"{OUT}/{STEM}.plan.json"

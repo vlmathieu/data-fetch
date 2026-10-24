@@ -1,0 +1,12 @@
+# Tout refusé par défaut
+*
+
+# Puis seulement ce dont l'image a besoin
+!workflow/
+!config/
+
+# Et jamais ceci, même sous un dossier autorisé
+.snakemake/
+data/
+**/__pycache__/
+**/.DS_Store

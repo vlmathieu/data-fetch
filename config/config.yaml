@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# data-fetch — source : UN Comtrade
+#
+# Seuls les paramètres qui varient figurent ici. Ceux qui ne varient jamais
+# sont des constantes dans workflow/scripts/comtrade_common.py (FIXED), avec
+# la raison en commentaire. Un paramètre qui ne varie pas est un paramètre
+# à supprimer.
+# ---------------------------------------------------------------------------
+
+comtrade:
+
+  # --- ce qui est demandé à l'API -----------------------------------------
+
+  data_type: final          # final | tariffline
+                            #   final      = standardisé par l'UNSD (estimations,
+                            #                unités converties). Le cas normal.
+                            #   tariffline = tel que déclaré, ligne tarifaire
+                            #                nationale, aucune standardisation.
+
+  freq: A                   # A (annuel) | M (mensuel)
+                            # En M, period.list est obligatoire, en YYYYMM.
+
+  classification: HS        # HS | H0..H6 | S1..S4 | BEC | EB02
+                            # HS = la révision en vigueur l'année demandée.
+                            # H0..H6 = une révision imposée (conversion UNSD).
+
+  period:
+    start: 1996
+    stop:  2023             # INCLUS. (Pas de piège "stop - 2" ici.)
+    # list: [199601, 199602]   # surcharge start/stop ; obligatoire si freq: M
+
+  cmd: ['4403', '4407', '4412']
+                            # Codes de la classification choisie.
+                            # AG2 / AG4 / AG6 acceptés.
+                            # TOTAL est REFUSÉ : volumes ingérables en sync.
+
+  flow: [M, X]              # M import, X export, RX ré-export, RM ré-import
+
+  reporter: all             # all, ou liste de codes numériques ['251', '156']
+  partner:  all             # all, ou liste de codes numériques
+
+  partner2:      null       # partenaire secondaire (origine/consignation)
+  aggregate_by:  null       # agrégation côté serveur
+  include_desc:  true       # false => les tables de libellés sont écrites à côté
+
+  # --- dérivé chez nous ----------------------------------------------------
+
+  hs_revision: strict       # strict | auto
+                            #   strict = codes passés tels quels ; avertissement
+                            #            sur chaque période où un code renvoie 0.
+                            #   auto   = substitution par révision. NON IMPLÉMENTÉ
+                            #            (chantier `mapping`, exige une table de
+                            #            correspondance).
+
+  mirror: true              # true => produit en plus le fichier de flux miroirs
+
+  # --- livraison ------------------------------------------------------------
+
+  format:  [parquet, csv]   # parquet = artefact canonique, types intacts, lu par
+                            #           le pipeline.
+                            # csv     = livrable collègues (Stata / R), seul format
+                            #           lu par les deux sans paquet supplémentaire.
+  csv_sep: ','              # locale anglaise ; décimale '.'
