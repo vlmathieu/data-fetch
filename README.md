@@ -25,13 +25,95 @@ It is the one step you can run without risk.
 
 ## API key
 
-Downloading requires a **premium** UN Comtrade subscription key, because it
-goes through `getFinalData` and not the public endpoint. Get one at
-[comtradedeveloper.un.org](https://comtradedeveloper.un.org): create an
-account, subscribe to the *comtrade-v1* product, then copy the *primary key*.
+Downloading Comtrade's data through the `getFinalData` function of the
+`comtradeapicall` package requires a UN Comtrade subscription key. It does not
+have to be a premium key: a **free** registered key opens the same endpoint.
+Premium raises the ceilings and the daily quota, it does not unlock the
+download.
 
-The workflow reads it from the environment variable **`comtrade_apikey`**, and
-nowhere else. It appears in no configuration file.
+The workflow reads the key from the environment variable **`comtrade_apikey`**,
+and nowhere else. It appears in no configuration file.
+
+### What each tier gives
+
+`getFinalData` calls `https://comtradeapi.un.org/data/v1/get/`, which is closed
+without a key. Preflight calls `https://comtradeapi.un.org/public/v1/preview/`
+instead, which is open to anyone.
+
+| Tier | Cost | Data API (`data/v1/get`) | Records per call | Calls per day |
+|---|---|---|---|---|
+| Public, no key | free | no access | preview only: 500 records, one period and one product per call | not stated |
+| Basic Individual | free, registration | yes | **100,000** | 500 |
+| Premium Individual | paid | yes | **250,000** | 5,000 |
+| Premium Institutional | paid | yes | **250,000** | unlimited |
+
+Two caveats on that table. The per-day figures come from the preview-API quota
+row of the subscription plans page plus its sentence that a free subscription
+includes "data API access for up to 500 calls/day"; the page states no separate
+Data API quota per tier. And it lists an API rate limit of 1 to 5 calls per
+second without mapping those values to tiers, which is part of why every call
+goes through `call()` with backoff.
+
+Bulk files and the async endpoint (2.5M records per call) are premium only.
+Neither is used here.
+
+### Getting a free key
+
+1. Register. Go to [comtrade.un.org](https://comtrade.un.org/), click **Login**
+   (top right), then **Sign-up now**. Enter an email, click **Send
+   verification code**, paste the code from the "United Nations B2C account
+   email verification code" message, click **Verify**, set a password and name,
+   then **Create**. You are logged in, and **My Comtrade Free** appears at the
+   top right.
+2. Open the API portal at
+   [comtradeplus.un.org/MyComtrade/APIPortal](https://comtradeplus.un.org/MyComtrade/APIPortal),
+   under My Comtrade.
+3. Click **Generate API Key** and copy it.
+
+That key is what goes into `comtrade_apikey`. The UN docs note it may be
+regenerated periodically, so expect to replace it one day. The API products
+portal at [comtradedeveloper.un.org](https://comtradedeveloper.un.org) also
+issues keys: subscribe to a product there and copy the *primary key*. Either
+one is a `subscription-key` this workflow accepts.
+
+### Going premium
+
+Premium is bought through [shop.un.org](https://shop.un.org), and questions
+about a subscription or its licensing go to subscriptions@un.org. The other
+route is institutional: many university libraries hold a premium subscription,
+and members register with their institutional email address, get approved, and
+then request a key (Yale, for one, documents that path). Premium buys the
+250,000-record ceiling and the larger daily quota, nothing else that matters
+here.
+
+### Which ceiling to put in the config
+
+`records_per_call` in [config/config.yaml](config/config.yaml) has to match the
+tier of the key you actually hold:
+
+```yaml
+records_per_call: 100000   # free registered key
+records_per_call: 250000   # premium, individual or institutional
+```
+
+It drives both the packing and the hard failure, and it defaults to the free
+value. Setting it above your own ceiling is the one mistake that loses data
+quietly: `getFinalData` truncates at the ceiling without raising, the file
+looks complete, and the guard never fires because it is watching for a higher
+number.
+
+### Sources
+
+Checked 2026-10-24.
+
+- [Subscription plans](https://uncomtrade.org/docs/subscriptions/), for the
+  per-tier ceilings and quotas.
+- [Free and premium subscriptions](https://comtradeplus.un.org/Subscriptions).
+- [How to create an account](https://uncomtrade.org/docs/how-to-create-an-account/).
+- [Acquiring API subscription keys](https://uncomtrade.org/docs/api-subscription-keys/).
+- [API docs](https://comtradeplus.un.org/ApiDocs).
+- [Access to UN Comtrade at Yale](https://library.yale.edu/eresources/access/access-un-comtrade),
+  an example of the institutional route.
 
 ### Setting the variable
 
@@ -68,7 +150,7 @@ cat data/comtrade/*.plan.json
 ```
 
 The plan gives the expected row count, the packing it settled on, and how many
-premium calls the run will cost.
+keyed calls the run will cost.
 
 ### What the key must never touch
 
@@ -84,7 +166,8 @@ One limit worth knowing: no file or environment variable mechanism hides a
 secret from a process running under your own account. What actually protects it
 is a vault you unlock interactively (Keychain, 1Password, `pass`), plus the
 simple rule that `comtrade_preflight` is the only rule safe to run.
-`comtrade_download` spends paid quota.
+`comtrade_download` spends your key's daily quota, which is a paid quota on
+premium.
 
 ## Parameters
 
@@ -103,25 +186,27 @@ Two explicit refusals:
   `mapping` job). v1 runs in `strict`: codes are passed through as given, with
   a warning on every period where a code returns zero rows.
 
-## Packing and the cap
+## Packing and the ceiling
 
-`getFinalData` caps at **250,000 records** and **truncates without error** at
-the cap. So the packing is not a guessed constant, it is measured:
+`getFinalData` **truncates without error** at the ceiling of your tier, so the
+packing is not a guessed constant, it is measured against `records_per_call`:
 
 1. a **free** count per period through the public endpoint. The count that
    comes back is the real one, not capped;
-2. greedy packing of consecutive periods under **200,000** rows (margin for
+2. greedy packing of consecutive periods under 80% of the ceiling (margin for
    upstream revisions between preflight and download);
 3. if a single period goes over on its own, bisection on the codes, still on
    free counts;
-4. hard failure at **250,000** rows received, warning from 200,000 on.
+4. hard failure at the ceiling, warning from 80% on.
 
 Counts are additive. A request over P1..Pn returns the union of the rows, so
 the sum of the per-period counts *is* the pack's count. That is what makes it
 possible to plan optimally without downloading a row.
 
-Measured over 1996-2023, codes 4403/4407/4412: **539,660 rows, 3 premium
-calls** (plus 28 free counting calls).
+Measured over 1996-2023, codes 4403/4407/4412, all reporters, M+X: 539,660
+rows and 28 free counting calls. Replaying those counts through the packer
+gives **9 keyed calls** on a free key (packing under 80,000) and **3** on
+premium (packing under 200,000).
 
 ## Outputs
 

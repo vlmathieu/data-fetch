@@ -11,11 +11,26 @@ import json
 import time
 
 # --- API caps ---------------------------------------------------------------
-# getFinalData caps at 250,000 records (package README). A response at the cap
-# is truncated WITHOUT error, so we fail instead of delivering.
-FAIL_ROWS = 250_000
-# Margin: preflight counts can move before the download (upstream revisions).
-WARN_ROWS = 200_000
+# getFinalData's ceiling is set by the subscription tier, not by the package:
+# 100K records per call on a free key, 250K on premium (see README). A response
+# at the ceiling is truncated WITHOUT error, so we fail instead of delivering.
+# The free value is the default, because guessing high is what truncates in
+# silence.
+FREE_RECORDS_PER_CALL = 100_000
+PREMIUM_RECORDS_PER_CALL = 250_000
+# Margin on the ceiling: preflight counts can move before the download
+# (upstream revisions).
+WARN_FRACTION = 0.8
+
+
+def caps(params: dict) -> tuple[int, int]:
+    """(warn, fail) row thresholds for this run's ceiling.
+
+    Read from the resolved params, so the ceiling the plan was packed against
+    is the one the download enforces.
+    """
+    fail = int(params["records_per_call"])
+    return int(fail * WARN_FRACTION), fail
 
 # --- fixed parameters -------------------------------------------------------
 # Outside the config, on purpose: they do not vary in this repo.
@@ -29,7 +44,10 @@ FIXED = {
 }
 
 # Keys that describe the delivery, not the request: excluded from the hash.
-_NOT_IN_HASH = frozenset({"format", "csv_sep", "mirror", "run_id", "out_dir"})
+# records_per_call is a transport ceiling, not part of the request: the same
+# selection pulled on a free and a premium key is the same data.
+_NOT_IN_HASH = frozenset({"format", "csv_sep", "mirror", "run_id", "out_dir",
+                          "records_per_call"})
 
 
 # --- parameter resolution ---------------------------------------------------
@@ -92,6 +110,8 @@ def resolve_params(cfg: dict) -> dict:
         "aggregate_by":   cfg.get("aggregate_by") or None,
         "include_desc":   bool(cfg.get("include_desc", True)),
         "hs_revision":    str(cfg.get("hs_revision", "strict")).lower(),
+        "records_per_call": int(cfg.get("records_per_call")
+                                or FREE_RECORDS_PER_CALL),
     }
 
     if params["data_type"] not in {"final", "tariffline"}:
@@ -103,6 +123,13 @@ def resolve_params(cfg: dict) -> dict:
         )
     if params["hs_revision"] != "strict":
         raise ValueError("hs_revision must be 'strict' or 'auto'")
+    if not 0 < params["records_per_call"] <= PREMIUM_RECORDS_PER_CALL:
+        raise ValueError(
+            f"records_per_call must be in 1..{PREMIUM_RECORDS_PER_CALL} "
+            f"({FREE_RECORDS_PER_CALL} on a free key, "
+            f"{PREMIUM_RECORDS_PER_CALL} on premium). Setting it above your "
+            f"tier's ceiling truncates the response without any error."
+        )
     return params
 
 
@@ -184,7 +211,7 @@ def selection(params: dict, period: str, cmd: list[str] | None = None) -> dict:
 
 # --- packing plan -----------------------------------------------------------
 
-def pack_periods(counts: dict[str, int], limit: int = WARN_ROWS) -> list[list[str]]:
+def pack_periods(counts: dict[str, int], limit: int) -> list[list[str]]:
     """Packs consecutive periods, keeping the sum under `limit`.
 
     Counts are additive: a request over P1..Pn returns the union of the rows,
@@ -209,7 +236,7 @@ def pack_periods(counts: dict[str, int], limit: int = WARN_ROWS) -> list[list[st
     return packs
 
 
-def bisect_codes(codes: list[str], count_fn, limit: int = WARN_ROWS
+def bisect_codes(codes: list[str], count_fn, limit: int
                  ) -> list[tuple[list[str], int]]:
     """Splits a list of codes until every group fits under `limit`.
 
@@ -241,6 +268,21 @@ def _demo() -> None:
 
     # stop is inclusive.
     assert a["period"] == ["1996", "1997", "1998"], a["period"]
+
+    # The ceiling defaults to the free tier and does not enter the hash.
+    assert a["records_per_call"] == FREE_RECORDS_PER_CALL
+    premium = resolve_params({**base, "records_per_call": PREMIUM_RECORDS_PER_CALL})
+    assert params_hash(a) == params_hash(premium), "ceiling leaked into the hash"
+    assert caps(a) == (80_000, 100_000), caps(a)
+    assert caps(premium) == (200_000, 250_000), caps(premium)
+
+    # A ceiling above every tier is refused: it would truncate in silence.
+    try:
+        resolve_params({**base, "records_per_call": 2_500_000})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("records_per_call above the premium ceiling should be refused")
 
     # The hash is stable across processes (hardcoded value: must stay identical).
     assert params_hash(a) == hashlib.sha256(

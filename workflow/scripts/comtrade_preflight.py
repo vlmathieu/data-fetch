@@ -32,11 +32,10 @@ from snakemake.script import snakemake
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comtrade_common import (  # noqa: E402
-    FAIL_ROWS,
     FIXED,
-    WARN_ROWS,
     bisect_codes,
     call,
+    caps,
     join as _join,
     pack_periods,
     params_hash,
@@ -91,6 +90,7 @@ def vintage(params: dict, periods: list[str], chunk: int = 10
 
 def build_plan(params: dict) -> dict:
     periods = params["period"]
+    warn_rows, fail_rows = caps(params)
     warnings: list[str] = []
     calls = 0
 
@@ -108,18 +108,18 @@ def build_plan(params: dict) -> dict:
             )
 
     packs: list[dict] = []
-    for pack in pack_periods(counts, WARN_ROWS):
+    for pack in pack_periods(counts, warn_rows):
         expected = sum(counts[p] for p in pack)
-        if len(pack) == 1 and expected >= WARN_ROWS:
+        if len(pack) == 1 and expected >= warn_rows:
             # Exception path: a single period already goes over the margin.
             # We split on the codes, still using the free counting.
             period = pack[0]
             warnings.append(
-                f"period {period}: {expected} rows >= {WARN_ROWS}, "
+                f"period {period}: {expected} rows >= {warn_rows}, "
                 f"split on the codes."
             )
             for codes, n in bisect_codes(
-                params["cmd"], lambda cs: count_rows(params, period, cs), WARN_ROWS
+                params["cmd"], lambda cs: count_rows(params, period, cs), warn_rows
             ):
                 packs.append({"periods": [period], "cmd": codes,
                               "expected_rows": n})
@@ -135,7 +135,7 @@ def build_plan(params: dict) -> dict:
         "params_hash": params_hash(params),
         "run_id": snakemake.params["run_id"],
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "thresholds": {"warn_rows": WARN_ROWS, "fail_rows": FAIL_ROWS},
+        "thresholds": {"warn_rows": warn_rows, "fail_rows": fail_rows},
         "counts": counts,
         "expected_rows_total": sum(counts.values()),
         "packs": packs,

@@ -23,9 +23,8 @@ from snakemake.script import snakemake
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comtrade_common import (  # noqa: E402
-    FAIL_ROWS,
-    WARN_ROWS,
     call,
+    caps,
     params_hash,
     selection,
 )
@@ -41,11 +40,13 @@ APIKEY = os.environ["comtrade_apikey"]
 
 
 def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
-    """One premium call per pack, with a check against the cap.
+    """One API call per pack, with a check against the ceiling.
 
-    getFinalData caps at 250,000 records and truncates WITHOUT error at the
-    cap. We fail rather than silently deliver an amputated file.
+    getFinalData truncates WITHOUT error at the ceiling of your subscription
+    tier (params["records_per_call"]). We fail rather than silently deliver an
+    amputated file.
     """
+    warn_rows, fail_rows = caps(params)
     fn = (comtradeapicall.getFinalData if params["data_type"] == "final"
           else comtradeapicall.getTarifflineData)
     period = ",".join(pack["periods"])
@@ -57,13 +58,14 @@ def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
     )
     rows = len(frame)
 
-    if rows >= FAIL_ROWS:
+    if rows >= fail_rows:
         raise RuntimeError(
-            f"[{label}] {rows} rows >= the {FAIL_ROWS} getFinalData cap: "
-            f"the response is truncated. Narrow the products or the period."
+            f"[{label}] {rows} rows >= the {fail_rows} getFinalData ceiling: "
+            f"the response is truncated. Narrow the products or the period, or "
+            f"raise records_per_call if your key allows it."
         )
-    if rows >= WARN_ROWS:
-        logging.warning("[%s] %d rows >= warning threshold %d", label, rows, WARN_ROWS)
+    if rows >= warn_rows:
+        logging.warning("[%s] %d rows >= warning threshold %d", label, rows, warn_rows)
 
     logging.info("[%s] %d rows (expected: %d)", label, rows,
                  pack["expected_rows"])

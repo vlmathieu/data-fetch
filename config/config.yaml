@@ -53,6 +53,15 @@ comtrade:
 
   mirror: true              # true => also produces the mirror flow file
 
+  records_per_call: 100000  # Data API ceiling of YOUR subscription tier.
+                            #   100000 = free key (Basic Individual)
+                            #   250000 = premium (individual or institutional)
+                            # Drives the packing and the hard failure. Setting
+                            # it above your own ceiling is the one mistake that
+                            # truncates the data WITHOUT any error. Excluded
+                            # from the params hash: it is a transport ceiling,
+                            # not part of the request.
+
   # --- delivery -------------------------------------------------------------
 
   format:  [parquet, csv]   # parquet = canonical artifact, types intact, the one

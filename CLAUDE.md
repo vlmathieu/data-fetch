@@ -8,7 +8,7 @@ it says what the repo does and why. This file says how to work in it.
 | Rule | State |
 |---|---|
 | `comtrade_preflight` | **verified end to end** against the real API |
-| `comtrade_download` | **never run**, requires the premium key |
+| `comtrade_download` | **never run**, requires an API key |
 | `comtrade_mirror` | **never run**, depends on the output of `download` |
 
 Syntax validated and DAG valid for all three, but that is not the same as
@@ -39,12 +39,13 @@ Snakefile ──(import at DAG time)──> comtrade_common.resolve_params, para
     │                                └─ sets STEM, hence every output path
     └─ include rules/comtrade.smk
          comtrade_preflight  → {STEM}.plan.json          PUBLIC endpoints, off quota
-         comtrade_download   → {STEM}.{parquet,csv} + {STEM}.meta.json   premium quota
+         comtrade_download   → {STEM}.{parquet,csv} + {STEM}.meta.json   keyed quota
          comtrade_mirror     → {STEM}.mirror.{parquet,csv}
 ```
 
 `comtrade_common.py` is shared between the Snakefile and the scripts. It holds
-the caps (`FAIL_ROWS`/`WARN_ROWS`), the `FIXED` constants, parameter resolution
+the ceilings (`caps()`, `FREE_RECORDS_PER_CALL`, `PREMIUM_RECORDS_PER_CALL`,
+`WARN_FRACTION`), the `FIXED` constants, parameter resolution
 and hashing, the `call()` wrapper, `selection()`, `pack_periods()` and
 `bisect_codes()`.
 
@@ -67,6 +68,12 @@ All found by running things, not by rereading them.
   detaches past runs from their request. That is not a free refactor.
 - **`comtrade_common.py` must stay cheap to import**: the Snakefile imports it
   before any rule. No polars, no comtradeapicall in there.
+- **The row ceiling is the key's, not the package's.** `records_per_call` in
+  the config is the Data API ceiling of the subscription tier: 100K on a free
+  key, 250K on premium. `caps()` derives the warning threshold from it at 80%.
+  It defaults to the free value and is in `_NOT_IN_HASH`, because the same
+  selection pulled on either key is the same data. Setting it above the real
+  ceiling truncates the response with no error and the guard never fires.
 - **`comtradeapicall` returns pandas.** Convert with `pl.from_pandas()` at the
   boundary, in the scripts; everything else is polars.
 - **`period.stop` is INCLUSIVE.** A deliberate correction of the `stop - 2` in
@@ -82,8 +89,9 @@ All found by running things, not by rereading them.
 Checked on the 1.2.1 installed locally and on the `main` source (1.3.2,
 pinned).
 
-- **`getFinalData` truncates silently at 250,000 records.** No error at the
-  cap. Hence the hard failure in `fetch_pack()`.
+- **`getFinalData` truncates silently at the tier ceiling** (100K free, 250K
+  premium). No error at the ceiling. Hence the hard failure in `fetch_pack()`,
+  against `records_per_call`.
 - **HTTP errors are swallowed**: `getPreviewData` prints the body and returns
   `None` without raising. So the `except:` in `_getFinalData` never fires on a
   429, and `pandas.concat` **ignores a `None` without error** (checked on
@@ -110,8 +118,9 @@ pinned).
 - **No `envvars:` directive** in the Snakefile, on purpose: it would make the
   whole workflow fail without a key, preflight included.
 - **`comtrade_preflight` is the only rule an agent can run without risk**:
-  public endpoints, no key, no quota. `comtrade_download` spends paid premium
-  quota, so do not run it without an explicit request.
+  public endpoints, no key, no quota. `comtrade_download` spends the key's
+  daily quota (500 calls/day free, paid on premium), so do not run it without
+  an explicit request.
 - The key never appears in the sidecar, the logs, or an error message. If some
   code logs a request URL, mask it: `subscription-key` travels in the query
   string.
@@ -122,9 +131,14 @@ To spot an abnormal run.
 
 ```
 Default config (1996-2023, codes 4403/4407/4412, M+X, all reporters):
-  539,660 rows expected,  28 free calls,  3 premium calls
-  packs: 1996-2006 → 187,296 | 2007-2015 → 184,257 | 2016-2023 → 168,107
+  539,660 rows expected,  28 free counting calls
   vintage: 4,756 records (reporter x period)
+  packs, free key (records_per_call 100000, packing under 80,000): 9 calls
+    1996-2000 → 75,120 | 2001-2004 → 72,785 | 2005-2007 → 59,893
+    2008-2010 → 60,867 | 2011-2013 → 61,208 | 2014-2016 → 62,894
+    2017-2019 → 64,248 | 2020-2022 → 62,004 | 2023      → 20,641
+  packs, premium (records_per_call 250000, packing under 200,000): 3 calls
+    1996-2006 → 187,296 | 2007-2015 → 184,257 | 2016-2023 → 168,107
 
 Orders of magnitude, all reporters, M+X:
   France 2015, ALL products  → 674,847   (hence the refusal of cmd: TOTAL)
