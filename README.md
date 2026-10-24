@@ -25,21 +25,68 @@ clé, aucun quota. C'est la seule étape qu'on peut lancer sans risque.
 
 ## Clé API
 
-`comtrade_apikey` doit être dans l'environnement. Elle est lue **dans le
-script** `comtrade_download.py`, jamais déclarée en `params:` d'une règle :
-Snakemake enregistre tous les `params` en clair dans `.snakemake/metadata/`,
-ce qui laisse le secret sur le disque.
+Le téléchargement exige une clé d'abonnement UN Comtrade **premium** : il passe
+par `getFinalData`, pas par l'endpoint public. La clé s'obtient sur
+[comtradedeveloper.un.org](https://comtradedeveloper.un.org) — créer un compte,
+puis souscrire au produit *comtrade-v1* et relever la *primary key*.
 
-Aucun mécanisme fichier ou variable d'environnement ne cache un secret à un
-processus qui tourne sous votre compte. Ce qui protège réellement :
+Le workflow la lit dans la variable d'environnement **`comtrade_apikey`**, et
+uniquement là. Elle n'apparaît dans aucun fichier de configuration.
 
-- un coffre à déverrouillage interactif — Keychain macOS via `keyring`,
-  1Password CLI (`op read`), ou `pass` avec gpg-agent ;
-- des règles de refus au niveau de l'outil, pour que seule la règle
-  `comtrade_preflight` soit lançable par un agent.
+### Poser la variable
 
-`.snakemake/` et `data/` sont dans `.gitignore` **et** `.dockerignore` depuis
-le premier commit.
+Le plus simple, pour une session de terminal :
+
+```zsh
+export comtrade_apikey="votre-cle"
+snakemake --sdm conda --cores 1
+```
+
+Pour ne pas la retaper à chaque session, zsh la lit depuis `~/.zshrc` — mais
+elle est alors en clair dans un fichier, et présente dans l'environnement de
+tous vos processus. Préférable : la ranger dans le Keychain macOS et la sortir
+à la demande.
+
+```zsh
+# une seule fois
+security add-generic-password -a "$USER" -s comtrade_apikey -w
+
+# à chaque session, ou dans une fonction de ~/.zshrc
+export comtrade_apikey="$(security find-generic-password -a "$USER" -s comtrade_apikey -w)"
+```
+
+Sous Linux, `pass` avec gpg-agent joue le même rôle ; `op read "op://…"` avec
+1Password CLI fonctionne partout.
+
+### Vérifier sans consommer de quota
+
+Le pré-vol n'utilise **aucune clé** : il interroge les endpoints publics de
+Comtrade. Il tourne donc avant même d'avoir souscrit, et chiffre le tirage :
+
+```zsh
+snakemake preflight --sdm conda --cores 1
+cat data/comtrade/*.plan.json
+```
+
+Le plan donne le nombre de lignes attendues, le découpage retenu et le nombre
+d'appels premium que le tirage coûtera.
+
+### Ce que la clé ne doit jamais toucher
+
+- Elle est lue **dans** `comtrade_download.py`, jamais déclarée en `params:`
+  d'une règle Snakemake.
+- Elle n'est écrite ni dans le sidecar, ni dans les logs, ni dans un message
+  d'erreur. Si vous ajoutez du code qui journalise une URL de requête,
+  masquez-la : `subscription-key` voyage en query-string.
+- `data/` et `.snakemake/` sont dans `.gitignore` **et** `.dockerignore` depuis
+  le premier commit.
+
+Et une limite à connaître : aucun mécanisme de fichier ou de variable
+d'environnement ne cache un secret à un processus tournant sous votre compte.
+Ce qui protège réellement, c'est un coffre à déverrouillage interactif
+(Keychain, 1Password, `pass`), plus la règle simple que seul
+`comtrade_preflight` est lançable sans risque — `comtrade_download`, lui,
+consomme du quota payant.
 
 ## Paramètres
 
