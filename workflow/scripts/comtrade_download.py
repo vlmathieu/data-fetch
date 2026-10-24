@@ -1,14 +1,13 @@
-"""Tirage selon le plan du pré-vol, puis écriture des données et du sidecar.
+"""Downloads according to the preflight plan, then writes the data and sidecar.
 
-Seule étape qui consomme du quota premium. La clé API est lue ICI, dans le
-script, et jamais passée en `params:` d'une règle : Snakemake enregistre tous
-les params en clair dans .snakemake/metadata/, ce qui laisse le secret sur le
-disque.
+The only step that spends premium quota. The API key is read HERE, in the
+script, and never passed in a rule's `params:`: Snakemake records every param
+in cleartext in .snakemake/metadata/, which leaves the secret on disk.
 """
 
-# Pas de `from __future__ import annotations` : Snakemake insère un
-# préambule avant ce fichier, et un import __future__ doit être en
-# première ligne. Python 3.12 gère nativement `str | None`.
+# No `from __future__ import annotations` here: Snakemake inserts a preamble
+# before this file, and a __future__ import has to be on the first line.
+# Python 3.12 handles `str | None` natively.
 import json
 import logging
 import os
@@ -42,10 +41,10 @@ APIKEY = os.environ["comtrade_apikey"]
 
 
 def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
-    """Un appel premium par paquet, avec contrôle du plafond.
+    """One premium call per pack, with a check against the cap.
 
-    getFinalData plafonne à 250 000 enregistrements et tronque SANS erreur au
-    plafond. On échoue plutôt que de livrer un fichier amputé en silence.
+    getFinalData caps at 250,000 records and truncates WITHOUT error at the
+    cap. We fail rather than silently deliver an amputated file.
     """
     fn = (comtradeapicall.getFinalData if params["data_type"] == "final"
           else comtradeapicall.getTarifflineData)
@@ -60,23 +59,23 @@ def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
 
     if rows >= FAIL_ROWS:
         raise RuntimeError(
-            f"[{label}] {rows} lignes ≥ plafond {FAIL_ROWS} de getFinalData : "
-            f"la réponse est tronquée. Restreindre les produits ou la période."
+            f"[{label}] {rows} rows >= the {FAIL_ROWS} getFinalData cap: "
+            f"the response is truncated. Narrow the products or the period."
         )
     if rows >= WARN_ROWS:
-        logging.warning("[%s] %d lignes ≥ seuil d'alerte %d", label, rows, WARN_ROWS)
+        logging.warning("[%s] %d rows >= warning threshold %d", label, rows, WARN_ROWS)
 
-    logging.info("[%s] %d lignes (attendues : %d)", label, rows,
+    logging.info("[%s] %d rows (expected: %d)", label, rows,
                  pack["expected_rows"])
     return pl.from_pandas(frame) if rows else pl.DataFrame()
 
 
 def _pkg_version(name: str) -> str:
-    """Version installée : une sortie qui change sans que le code change."""
+    """Installed version: an output that changes without the code changing."""
     try:
         return metadata.version(name)
     except metadata.PackageNotFoundError:
-        return "inconnu"
+        return "unknown"
 
 
 def git_commit() -> str | None:
@@ -98,54 +97,54 @@ for pack in plan["packs"]:
     if frame.height:
         frames.append(frame)
     else:
-        warnings.append(f"paquet {','.join(pack['periods'])} : 0 ligne reçue")
+        warnings.append(f"pack {','.join(pack['periods'])}: 0 rows received")
 
 if not frames:
-    raise RuntimeError("aucune donnée reçue pour cette sélection")
+    raise RuntimeError("no data received for this selection")
 
 data = pl.concat(frames, how="vertical_relaxed")
 
-# Contrôle d'intégrité : aucune période demandée ne doit manquer en silence.
+# Integrity check: no requested period may go missing in silence.
 got = set(data["period"].cast(pl.String).unique())
 missing = sorted(set(params["period"]) - got)
 if missing:
-    warnings.append(f"périodes demandées absentes du résultat : {missing}")
-    logging.warning("périodes absentes : %s", missing)
+    warnings.append(f"requested periods absent from the result: {missing}")
+    logging.warning("absent periods: %s", missing)
 
-logging.info("total : %d lignes, %d colonnes", data.height, data.width)
+logging.info("total: %d rows, %d columns", data.height, data.width)
 
-# --- écritures --------------------------------------------------------------
+# --- writes -----------------------------------------------------------------
 
 outputs = {Path(p).suffix.lstrip("."): p for p in snakemake.output}
 meta_path = next(p for p in snakemake.output if p.endswith(".meta.json"))
-base = meta_path[: -len(".meta.json")]  # radical commun, sidecar compris
+base = meta_path[: -len(".meta.json")]  # shared stem, sidecar included
 
 if "parquet" in outputs:
     data.write_parquet(outputs["parquet"], compression="zstd")
 if "csv" in outputs:
-    # polars quote automatiquement les champs contenant le séparateur, donc
-    # « China, Hong Kong SAR » survit à un séparateur virgule. Les zéros
-    # initiaux, eux, sont perdus à la RELECTURE du CSV : le pipeline ne lit
-    # jamais ce fichier, le parquet est l'artefact canonique.
+    # polars quotes fields containing the separator automatically, so
+    # "China, Hong Kong SAR" survives a comma separator. Leading zeros, on the
+    # other hand, are lost when the CSV is READ BACK: the pipeline never reads
+    # this file, the parquet is the canonical artifact.
     data.write_csv(outputs["csv"], separator=snakemake.params["csv_sep"])
 
 if not params["include_desc"]:
-    # Sans les libellés dans les données, les tables de référence doivent être
-    # livrées à côté, sinon le fichier n'est pas interprétable.
+    # Without the labels in the data, the reference tables have to be delivered
+    # alongside, otherwise the file cannot be interpreted.
     for category in ("reporter", "partner", f"cmd:{params['classification']}"):
         try:
             ref = call(comtradeapicall.getReference, category, attempts=2,
                        label=f"reference {category}")
         except RuntimeError as exc:
-            warnings.append(f"table de référence {category} indisponible : {exc}")
+            warnings.append(f"reference table {category} unavailable: {exc}")
             continue
         name = category.replace(":", "_")
         pl.from_pandas(ref).write_csv(
             f"{base}.ref_{name}.csv", separator=snakemake.params["csv_sep"]
         )
 
-# Lien par hash, pas un `latest` global : un latest unique devient faux dès
-# qu'il y a deux requêtes différentes dans le même dossier.
+# Link by hash, not a global `latest`: a single latest becomes wrong as soon as
+# there are two different requests in the same folder.
 for extension in ("parquet", "csv"):
     if extension in outputs:
         target = Path(outputs[extension])
@@ -172,8 +171,8 @@ sidecar = {
                  "polars": pl.__version__},
     "git_commit": git_commit(),
 }
-# Jamais la clé API dans le sidecar.
+# Never the API key in the sidecar.
 Path(meta_path).write_text(
     json.dumps(sidecar, indent=2, ensure_ascii=False), encoding="utf-8"
 )
-logging.info("sidecar écrit : %s", meta_path)
+logging.info("sidecar written: %s", meta_path)

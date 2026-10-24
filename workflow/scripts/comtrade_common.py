@@ -1,7 +1,7 @@
-"""Helpers partagés : résolution des paramètres, hash stable, enveloppe d'appel.
+"""Shared helpers: parameter resolution, stable hash, call wrapper.
 
-Importé par le Snakefile (pour calculer les chemins de sortie au moment du DAG)
-et par les scripts de règle.
+Imported by the Snakefile (to compute the output paths at DAG time) and by the
+rule scripts.
 """
 
 from __future__ import annotations
@@ -10,32 +10,32 @@ import hashlib
 import json
 import time
 
-# --- plafonds de l'API ------------------------------------------------------
-# getFinalData est plafonné à 250 000 enregistrements (README du paquet). Une
-# réponse au plafond est tronquée SANS erreur : on échoue au lieu de livrer.
+# --- API caps ---------------------------------------------------------------
+# getFinalData caps at 250,000 records (package README). A response at the cap
+# is truncated WITHOUT error, so we fail instead of delivering.
 FAIL_ROWS = 250_000
-# Marge : les comptes du pré-vol peuvent bouger avant le tirage (révisions amont).
+# Margin: preflight counts can move before the download (upstream revisions).
 WARN_ROWS = 200_000
 
-# --- paramètres figés -------------------------------------------------------
-# Hors config, volontairement : ils ne varient pas dans ce repo.
+# --- fixed parameters -------------------------------------------------------
+# Outside the config, on purpose: they do not vary in this repo.
 FIXED = {
-    "type": "C",                  # biens uniquement ; 'S' (services) hors périmètre
-    "breakdown_mode": "classic",  # 'plus' n'est utile qu'avec customs/mot
-    "customs": None,              # n'existe qu'en breakdown 'plus'
-    "mot": None,                  # idem
-    "max_records": None,          # aucun troncage voulu
-    "proxy_url": None,            # pas de proxy institutionnel
+    "type": "C",                  # goods only; 'S' (services) out of scope
+    "breakdown_mode": "classic",  # 'plus' is only useful with customs/mot
+    "customs": None,              # exists only in breakdown 'plus'
+    "mot": None,                  # same
+    "max_records": None,          # no truncation wanted
+    "proxy_url": None,            # no institutional proxy
 }
 
-# Clés qui décrivent la livraison, pas la requête : exclues du hash.
+# Keys that describe the delivery, not the request: excluded from the hash.
 _NOT_IN_HASH = frozenset({"format", "csv_sep", "mirror", "run_id", "out_dir"})
 
 
-# --- résolution des paramètres ---------------------------------------------
+# --- parameter resolution ---------------------------------------------------
 
 def _norm_list(value) -> list[str] | None:
-    """Liste canonique de chaînes, triée et dédupliquée. None reste None."""
+    """Canonical list of strings, sorted and deduplicated. None stays None."""
     if value is None:
         return None
     if isinstance(value, (str, int)):
@@ -45,7 +45,7 @@ def _norm_list(value) -> list[str] | None:
 
 
 def _norm_selector(value) -> list[str] | None:
-    """'all' et None valent None (= tous), sinon une liste canonique."""
+    """'all' and None both mean None (= every one), otherwise a canonical list."""
     if value is None or (isinstance(value, str) and value.strip().lower() == "all"):
         return None
     return _norm_list(value)
@@ -56,27 +56,27 @@ def _periods(cfg: dict) -> list[str]:
     if period.get("list"):
         return sorted(str(p).strip() for p in period["list"])
     if str(cfg.get("freq", "A")).upper() == "M":
-        raise ValueError("freq: M exige comtrade.period.list, en YYYYMM")
+        raise ValueError("freq: M requires comtrade.period.list, in YYYYMM")
     start, stop = int(period["start"]), int(period["stop"])
     if stop < start:
         raise ValueError(f"period.stop ({stop}) < period.start ({start})")
-    return [str(y) for y in range(start, stop + 1)]  # stop INCLUS
+    return [str(y) for y in range(start, stop + 1)]  # stop INCLUSIVE
 
 
 def resolve_params(cfg: dict) -> dict:
-    """Applique les défauts et normalise. C'est ce dict qui est haché et stocké.
+    """Applies the defaults and normalizes. This dict is what gets hashed and stored.
 
-    Hacher les paramètres *résolus* et non ceux écrits : sans ça, deux configs
-    équivalentes (ordre des listes, entier vs chaîne, défaut omis) donneraient
-    deux hash différents pour la même requête.
+    Hashing the *resolved* parameters rather than the written ones: without
+    that, two equivalent configs (list order, int vs string, omitted default)
+    would give two different hashes for the same request.
     """
     cmd = _norm_list(cfg.get("cmd"))
     if not cmd:
-        raise ValueError("comtrade.cmd est obligatoire")
+        raise ValueError("comtrade.cmd is required")
     if any(c.upper() == "TOTAL" for c in cmd):
         raise ValueError(
-            "cmd: TOTAL est refusé — une seule paire reporter-année dépasse "
-            "déjà le plafond de 250 K (France 2015 : 674 847 lignes)."
+            "cmd: TOTAL is refused. A single reporter-year pair already goes "
+            "over the 250K cap (France 2015: 674,847 rows)."
         )
 
     params = {
@@ -95,22 +95,22 @@ def resolve_params(cfg: dict) -> dict:
     }
 
     if params["data_type"] not in {"final", "tariffline"}:
-        raise ValueError("data_type doit valoir 'final' ou 'tariffline'")
+        raise ValueError("data_type must be 'final' or 'tariffline'")
     if params["hs_revision"] == "auto":
         raise NotImplementedError(
-            "hs_revision: auto exige une table de correspondance par révision "
-            "(chantier `mapping`). Utiliser 'strict' en v1."
+            "hs_revision: auto requires a correspondence table per revision "
+            "(`mapping` job). Use 'strict' in v1."
         )
     if params["hs_revision"] != "strict":
-        raise ValueError("hs_revision doit valoir 'strict' ou 'auto'")
+        raise ValueError("hs_revision must be 'strict' or 'auto'")
     return params
 
 
 def params_hash(params: dict, length: int = 8) -> str:
-    """Empreinte courte et stable du jeu de paramètres résolu.
+    """Short, stable fingerprint of the resolved parameter set.
 
-    hashlib, jamais hash() : le hash() de Python est randomisé par processus sur
-    les chaînes (PYTHONHASHSEED), donc il changerait à chaque exécution.
+    hashlib, never hash(): Python's hash() is randomized per process on
+    strings (PYTHONHASHSEED), so it would change on every run.
     """
     payload = {k: v for k, v in params.items() if k not in _NOT_IN_HASH}
     canon = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
@@ -118,50 +118,50 @@ def params_hash(params: dict, length: int = 8) -> str:
 
 
 def stem(params: dict, run_id: str) -> str:
-    """Radical commun au fichier de données, au CSV et au sidecar."""
+    """Stem shared by the data file, the CSV and the sidecar."""
     return (
         f"comtrade_{params['classification']}_{params['freq']}"
         f"_{params_hash(params)}_{run_id}"
     )
 
 
-# --- enveloppe d'appel ------------------------------------------------------
+# --- call wrapper -----------------------------------------------------------
 
 def call(fn, *args, attempts: int = 5, base_delay: float = 5.0,
          label: str = "", **kwargs):
-    """Appelle une fonction comtradeapicall en traitant un retour None comme un échec.
+    """Calls a comtradeapicall function, treating a None return as a failure.
 
-    Indispensable : le paquet avale les erreurs HTTP. getPreviewData imprime le
-    corps de la réponse et retourne None sans lever, et pandas.concat ignore
-    ensuite ce None sans erreur (vérifié sur pandas 2.2.2 et 3.0.1). Une période
-    en 429 disparaîtrait donc du résultat sans laisser de trace.
+    Required, because the package swallows HTTP errors. getPreviewData prints
+    the response body and returns None without raising, and pandas.concat then
+    ignores that None without error (checked on pandas 2.2.2 and 3.0.1). A
+    period hitting a 429 would therefore vanish from the result without a trace.
     """
-    detail = "aucune tentative"
+    detail = "no attempt"
     for attempt in range(attempts):
         try:
             out = fn(*args, **kwargs)
             if out is not None:
                 return out
-            detail = "réponse None (erreur HTTP avalée par comtradeapicall)"
+            detail = "None response (HTTP error swallowed by comtradeapicall)"
         except Exception as exc:                      # noqa: BLE001
             detail = f"{type(exc).__name__}: {exc}"
         if attempt < attempts - 1:
             time.sleep(base_delay * 2 ** attempt)     # 5s, 10s, 20s, 40s
-    raise RuntimeError(f"échec après {attempts} tentatives [{label}] : {detail}")
+    raise RuntimeError(f"failed after {attempts} attempts [{label}]: {detail}")
 
 
-# --- critères de sélection --------------------------------------------------
+# --- selection criteria -----------------------------------------------------
 
 def join(values) -> str | None:
-    """Liste -> chaîne séparée par des virgules. None (= tous) reste None."""
+    """List -> comma-separated string. None (= every one) stays None."""
     return None if values is None else ",".join(values)
 
 
 def selection(params: dict, period: str, cmd: list[str] | None = None) -> dict:
-    """Arguments de sélection, communs au comptage et au tirage.
+    """Selection arguments, shared by the counting and the download.
 
-    Les deux doivent utiliser exactement les mêmes, sinon le compte ne décrit
-    pas ce qui sera réellement téléchargé.
+    Both must use exactly the same ones, otherwise the count does not describe
+    what will actually be downloaded.
     """
     args = dict(
         typeCode=FIXED["type"],
@@ -182,17 +182,17 @@ def selection(params: dict, period: str, cmd: list[str] | None = None) -> dict:
     return args
 
 
-# --- planification du découpage --------------------------------------------
+# --- packing plan -----------------------------------------------------------
 
 def pack_periods(counts: dict[str, int], limit: int = WARN_ROWS) -> list[list[str]]:
-    """Empaquette des périodes consécutives en gardant la somme sous `limit`.
+    """Packs consecutive periods, keeping the sum under `limit`.
 
-    Les comptes sont additifs : une requête sur P1..Pn renvoie l'union des
-    lignes, donc la somme des comptes par période EST le compte du paquet.
-    C'est ce qui permet de planifier à l'optimum sans tirer une seule ligne.
+    Counts are additive: a request over P1..Pn returns the union of the rows,
+    so the sum of the per-period counts IS the pack's count. That is what makes
+    it possible to plan optimally without downloading a single row.
 
-    Une période seule au-dessus de `limit` part dans son propre paquet ; c'est
-    au tirage de la scinder sur les codes (cf. bisect_codes).
+    A period above `limit` on its own goes into a pack of its own; splitting it
+    on the codes is the download's job (see bisect_codes).
     """
     packs: list[list[str]] = []
     current: list[str] = []
@@ -211,10 +211,10 @@ def pack_periods(counts: dict[str, int], limit: int = WARN_ROWS) -> list[list[st
 
 def bisect_codes(codes: list[str], count_fn, limit: int = WARN_ROWS
                  ) -> list[tuple[list[str], int]]:
-    """Scinde une liste de codes jusqu'à ce que chaque groupe tienne sous `limit`.
+    """Splits a list of codes until every group fits under `limit`.
 
-    `count_fn(codes) -> int` doit passer par le comptage gratuit. Chemin
-    d'exception : avec TOTAL refusé, aucune sélection courante n'y arrive.
+    `count_fn(codes) -> int` must go through the free counting. Exception path:
+    with TOTAL refused, no ordinary selection gets here.
     """
     n = count_fn(codes)
     if n < limit or len(codes) == 1:
@@ -224,61 +224,61 @@ def bisect_codes(codes: list[str], count_fn, limit: int = WARN_ROWS
             + bisect_codes(codes[middle:], count_fn, limit))
 
 
-# --- contrôle ---------------------------------------------------------------
+# --- check ------------------------------------------------------------------
 
 def _demo() -> None:
-    """Contrôle exécutable du hash et de l'empaquetage : python comtrade_common.py"""
+    """Runnable check of the hash and the packing: python comtrade_common.py"""
     base = {"period": {"start": 1996, "stop": 1998}, "cmd": ["4403", "4407"]}
 
-    # Le hash ignore l'ordre des listes, le type, et les clés de livraison.
+    # The hash ignores list order, type, and the delivery keys.
     a = resolve_params(base)
     b = resolve_params({"period": {"start": 1996, "stop": 1998},
                         "cmd": [4407, "4403"], "flow": ["X", "M"]})
-    assert params_hash(a) == params_hash(b), "hash sensible à l'ordre ou au type"
+    assert params_hash(a) == params_hash(b), "hash sensitive to order or type"
 
     c = resolve_params({**base, "classification": "H5"})
-    assert params_hash(a) != params_hash(c), "hash insensible à un vrai changement"
+    assert params_hash(a) != params_hash(c), "hash blind to a real change"
 
-    # stop est inclusif.
+    # stop is inclusive.
     assert a["period"] == ["1996", "1997", "1998"], a["period"]
 
-    # Le hash est stable entre processus (valeur en dur : doit rester identique).
+    # The hash is stable across processes (hardcoded value: must stay identical).
     assert params_hash(a) == hashlib.sha256(
         json.dumps({k: v for k, v in a.items() if k not in _NOT_IN_HASH},
                    sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()[:8]
 
-    # Empaquetage : somme sous la limite, ordre chronologique préservé.
+    # Packing: sum under the limit, chronological order preserved.
     counts = {"1996": 90, "1997": 90, "1998": 90, "1999": 10}
     assert pack_periods(counts, limit=200) == [["1996", "1997"], ["1998", "1999"]]
-    # Une période seule au-dessus de la limite reste seule.
+    # A period above the limit on its own stays on its own.
     assert pack_periods({"1996": 500, "1997": 10}, limit=200) == [["1996"], ["1997"]]
-    # Aucune période perdue, quel que soit le découpage.
+    # No period lost, whatever the split.
     assert sorted(p for pk in pack_periods(counts, 200) for p in pk) == sorted(counts)
 
-    # Bissection des codes.
+    # Code bisection.
     sizes = {"a": 150, "b": 150, "c": 10, "d": 10}
     got = bisect_codes(["a", "b", "c", "d"], lambda cs: sum(sizes[x] for x in cs), 200)
     assert all(n < 200 for _, n in got), got
     assert sorted(x for cs, _ in got for x in cs) == ["a", "b", "c", "d"]
 
-    # TOTAL refusé.
+    # TOTAL refused.
     try:
         resolve_params({**base, "cmd": ["TOTAL"]})
     except ValueError:
         pass
     else:
-        raise AssertionError("TOTAL devrait être refusé")
+        raise AssertionError("TOTAL should be refused")
 
-    # hs_revision: auto non implémenté.
+    # hs_revision: auto not implemented.
     try:
         resolve_params({**base, "hs_revision": "auto"})
     except NotImplementedError:
         pass
     else:
-        raise AssertionError("hs_revision: auto devrait lever NotImplementedError")
+        raise AssertionError("hs_revision: auto should raise NotImplementedError")
 
-    print("comtrade_common : contrôles OK")
+    print("comtrade_common: checks OK")
 
 
 if __name__ == "__main__":

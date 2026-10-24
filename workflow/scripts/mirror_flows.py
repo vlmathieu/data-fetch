@@ -1,22 +1,22 @@
-"""Flux miroirs : les deux déclarations d'une même arête, côte à côte.
+"""Mirror flows: both declarations of one edge, side by side.
 
-Un flux bilatéral est déclaré deux fois — par l'exportateur (flowCode 'X') et
-par l'importateur ('M'). Ce script ne les réconcilie PAS : il les met côte à
-côte, suffixés `_exp` et `_imp`.
+A bilateral flow is declared twice, by the exporter (flowCode 'X') and by the
+importer ('M'). This script does NOT reconcile them: it puts them side by side,
+suffixed `_exp` and `_imp`.
 
-Deux règles, héritées de trade_network_analysis et non négociables :
+Two rules, inherited from trade_network_analysis and non-negotiable:
 
-  - Jamais de réconciliation. Pas de moyenne FOB/CIF, pas de substitution d'un
-    côté par l'autre. L'écart entre les deux déclarations est un signal de
-    qualité de la donnée, pas du bruit à moyenner.
-  - Les nuls restent nuls, pas zéro. Les sommes sont gardées : un groupe
-    entièrement nul reste nul. Sinon un non-déclarant devient un déclarant à
-    zéro et le diagnostic disparaît.
+  - No reconciliation. No FOB/CIF averaging, no substituting one side for the
+    other. The gap between the two declarations is a data quality signal, not
+    noise to average away.
+  - Nulls stay null, not zero. Sums are guarded: a group that is entirely null
+    stays null. Otherwise a non-reporter turns into a reporter declaring zero
+    and the diagnostic disappears.
 """
 
-# Pas de `from __future__ import annotations` : Snakemake insère un
-# préambule avant ce fichier, et un import __future__ doit être en
-# première ligne. Python 3.12 gère nativement `str | None`.
+# No `from __future__ import annotations` here: Snakemake inserts a preamble
+# before this file, and a __future__ import has to be on the first line.
+# Python 3.12 handles `str | None` natively.
 import logging
 import os
 import sys
@@ -36,12 +36,12 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# Grandeurs mesurées de Comtrade, dans l'ordre de leur apparition en colonnes.
+# Comtrade's measured quantities, in the order their columns appear.
 MEASURES = ("netWgt", "grossWgt", "qty", "altQty",
             "fobvalue", "cifvalue", "primaryValue")
 
-# L'exportateur et l'importateur ne sont pas le même acteur selon le sens du
-# flux : dans un rapport d'export, le déclarant est l'exportateur.
+# The exporter and the importer are not the same actor depending on the
+# direction of the flow: in an export report, the reporter is the exporter.
 ROLES = {
     "X": {"reporterISO": "exporterISO", "reporterDesc": "exporterDesc",
           "partnerISO": "importerISO", "partnerDesc": "importerDesc"},
@@ -53,10 +53,10 @@ KEYS = ["period", "cmdCode", "exporterISO", "importerISO"]
 
 
 def guarded_sum(column: str) -> pl.Expr:
-    """Somme qui reste nulle si le groupe n'a aucune valeur renseignée.
+    """Sum that stays null if the group has no value filled in.
 
-    `sum()` seul renvoie 0 sur un groupe tout-nul, ce qui transforme un
-    non-déclarant en déclarant à zéro.
+    `sum()` alone returns 0 on an all-null group, which turns a non-reporter
+    into a reporter declaring zero.
     """
     return (
         pl.when(pl.col(column).count() > 0)
@@ -67,7 +67,7 @@ def guarded_sum(column: str) -> pl.Expr:
 
 
 def one_side(data: pl.DataFrame, flow_code: str, suffix: str) -> pl.DataFrame:
-    """Un côté du miroir : les déclarations d'un seul sens de flux."""
+    """One side of the mirror: the declarations for a single flow direction."""
     rename = {k: v for k, v in ROLES[flow_code].items() if k in data.columns}
     measures = [m for m in MEASURES if m in data.columns]
     side = data.filter(pl.col("flowCode") == flow_code).rename(rename)
@@ -75,7 +75,7 @@ def one_side(data: pl.DataFrame, flow_code: str, suffix: str) -> pl.DataFrame:
     descriptions = [c for c in ("exporterDesc", "importerDesc") if c in side.columns]
     aggregated = side.group_by(KEYS).agg(
         [guarded_sum(m) for m in measures]
-        # Le libellé dépend de l'ISO : premier non-nul, pas une clé de groupe.
+        # The label depends on the ISO: first non-null, not a group key.
         + [pl.col(d).drop_nulls().first().alias(d) for d in descriptions]
     )
     return aggregated.rename(
@@ -92,7 +92,7 @@ data = (
 dropped = sorted(set(data["flowCode"].unique()) - {"M", "X"})
 if dropped:
     logging.warning(
-        "flux ignorés par le miroir (ni M ni X) : %s — %d ligne(s)",
+        "flows ignored by the mirror (neither M nor X): %s, %d row(s)",
         dropped, data.filter(pl.col("flowCode").is_in(dropped)).height,
     )
 
@@ -100,7 +100,7 @@ mirror = one_side(data, "X", "exp").join(
     one_side(data, "M", "imp"), on=KEYS, how="full", coalesce=True
 )
 
-# Un pays peut n'apparaître que d'un seul côté : on réunit les libellés.
+# A country may appear on one side only: we merge the labels.
 for role in ("exporter", "importer"):
     sides = [f"{role}Desc_{s}" for s in ("exp", "imp") if f"{role}Desc_{s}" in mirror.columns]
     if sides:
@@ -110,12 +110,12 @@ for role in ("exporter", "importer"):
 
 mirror = mirror.sort(KEYS)
 
-logging.info("miroir : %d arête(s) dirigée(s), %d colonnes",
+logging.info("mirror: %d directed edge(s), %d columns",
              mirror.height, mirror.width)
-for side, label in (("exp", "exportateur"), ("imp", "importateur")):
+for side, label in (("exp", "exporter"), ("imp", "importer")):
     column = f"primaryValue_{side}"
     if column in mirror.columns:
-        logging.info("arêtes sans déclaration %s : %d", label,
+        logging.info("edges with no %s declaration: %d", label,
                      mirror[column].null_count())
 
 outputs = {Path(p).suffix.lstrip("."): p for p in snakemake.output}

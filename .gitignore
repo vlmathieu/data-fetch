@@ -1,8 +1,8 @@
-# Données téléchargées : jamais versionnées (volumineuses, horodatées, régénérables)
+# Downloaded data: never versioned (large, timestamped, regenerable)
 data/
 !data/**/.gitkeep
 
-# État Snakemake — contient les params des règles, donc potentiellement des secrets
+# Snakemake state: holds rule params, so potentially secrets
 .snakemake/
 workflow/logs/*
 !workflow/logs/.gitkeep
@@ -17,6 +17,6 @@ __pycache__/
 *.py[cod]
 .venv/
 
-# OS / éditeurs
+# OS / editors
 .DS_Store
 .vscode/settings.json

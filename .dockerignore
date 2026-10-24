@@ -1,11 +1,11 @@
-# Tout refusé par défaut
+# Everything refused by default
 *
 
-# Puis seulement ce dont l'image a besoin
+# Then only what the image needs
 !workflow/
 !config/
 
-# Et jamais ceci, même sous un dossier autorisé
+# And never these, even under an allowed folder
 .snakemake/
 data/
 **/__pycache__/

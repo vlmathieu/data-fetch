@@ -1,8 +1,8 @@
 rule comtrade_preflight:
-    """Compte les lignes et relève le millésime. Endpoints publics : hors quota.
+    """Counts rows and records the vintage. Public endpoints: off quota.
 
-    Aucune clé API. C'est la seule règle qu'on peut lancer sans risque de
-    consommer du quota premium.
+    No API key. This is the only rule you can run without risk of spending
+    premium quota.
     """
     output:
         f'{OUT}/{STEM}.plan.json'
@@ -19,10 +19,10 @@ rule comtrade_preflight:
 
 
 rule comtrade_download:
-    """Tirage selon le plan. Seule règle qui consomme du quota premium.
+    """Downloads according to the plan. The only rule that spends premium quota.
 
-    Lit comtrade_apikey dans l'environnement, à l'intérieur du script : jamais
-    en `params:`, que Snakemake enregistre en clair dans .snakemake/metadata/.
+    Reads comtrade_apikey from the environment, inside the script: never in
+    `params:`, which Snakemake records in cleartext in .snakemake/metadata/.
     """
     input:
         f'{OUT}/{STEM}.plan.json'
@@ -40,7 +40,7 @@ rule comtrade_download:
 
 
 rule comtrade_mirror:
-    """Les deux déclarations d'une même arête, côte à côte. Jamais réconciliées."""
+    """Both declarations of one edge, side by side. Never reconciled."""
     input:
         f'{OUT}/{STEM}.parquet'
     output:
