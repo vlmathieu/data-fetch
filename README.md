@@ -47,15 +47,15 @@ instead, which is open to anyone.
 | Premium Individual | paid | yes | **250,000** | 5,000 |
 | Premium Institutional | paid | yes | **250,000** | unlimited |
 
-Two caveats on that table. The per-day figures come from the preview-API quota
-row of the subscription plans page plus its sentence that a free subscription
-includes "data API access for up to 500 calls/day"; the page states no separate
-Data API quota per tier. And it lists an API rate limit of 1 to 5 calls per
-second without mapping those values to tiers, which is part of why every call
-goes through `call()` with backoff.
+*Nota Bene 1*: The per-day figures come from the preview-API quota row of the
+subscription plans page plus its sentence that a free subscription includes
+"data API access for up to 500 calls/day"; the page states no separate Data API
+quota per tier. And it lists an API rate limit of 1 to 5 calls per second
+without mapping those values to tiers, which is part of why every call goes
+through `call()` with backoff.
 
-Bulk files and the async endpoint (2.5M records per call) are premium only.
-Neither is used here.
+*Nota Bene 2*: Bulk files and the async endpoint (2.5M records per call) are
+premium only. Neither is used here.
 
 ### Getting a free key
 
@@ -82,9 +82,8 @@ Premium is bought through [shop.un.org](https://shop.un.org), and questions
 about a subscription or its licensing go to subscriptions@un.org. The other
 route is institutional: many university libraries hold a premium subscription,
 and members register with their institutional email address, get approved, and
-then request a key (Yale, for one, documents that path). Premium buys the
-250,000-record ceiling and the larger daily quota, nothing else that matters
-here.
+then request a key. Premium buys the 250,000-record ceiling and the larger daily
+quota, nothing else that matters here.
 
 ### Which ceiling to put in the config
 
@@ -98,9 +97,9 @@ records_per_call: 250000   # premium, individual or institutional
 
 It drives both the packing and the hard failure, and it defaults to the free
 value. Setting it above your own ceiling is the one mistake that loses data
-quietly: `getFinalData` truncates at the ceiling without raising, the file
-looks complete, and the guard never fires because it is watching for a higher
-number.
+quietly: `getFinalData` truncates at the ceiling without raising an error, the
+file looks complete, and the guard never fires because it is watching for a
+higher number.
 
 ### Sources
 
@@ -124,9 +123,10 @@ export comtrade_apikey="your-key"
 snakemake --sdm conda --cores 1
 ```
 
-To avoid retyping it every session, zsh will read it from `~/.zshrc`, but it is
-then in cleartext in a file and present in the environment of every process you
-run. Better: keep it in the macOS Keychain and pull it out on demand.
+*For MacOS users*: To avoid retyping it every session, zsh will read it from
+`~/.zshrc`, but it is then in cleartext in a file and present in the environment
+of every process you run. Better: keep it in the macOS Keychain and pull it out
+on demand.
 
 ```zsh
 # once
@@ -138,6 +138,8 @@ export comtrade_apikey="$(security find-generic-password -a "$USER" -s comtrade_
 
 On Linux, `pass` with gpg-agent plays the same role; `op read "op://…"` with the
 1Password CLI works everywhere.
+
+The API key is then read **inside** `comtrade_download.py.
 
 ### Checking without spending quota
 
@@ -152,23 +154,6 @@ cat data/comtrade/*.plan.json
 The plan gives the expected row count, the packing it settled on, and how many
 keyed calls the run will cost.
 
-### What the key must never touch
-
-- It is read **inside** `comtrade_download.py`, never declared in a Snakemake
-  rule's `params:`.
-- It is not written to the sidecar, to the logs, or into an error message. If
-  you add code that logs a request URL, mask it: `subscription-key` travels in
-  the query string.
-- `data/` and `.snakemake/` have been in `.gitignore` **and** `.dockerignore`
-  since the first commit.
-
-One limit worth knowing: no file or environment variable mechanism hides a
-secret from a process running under your own account. What actually protects it
-is a vault you unlock interactively (Keychain, 1Password, `pass`), plus the
-simple rule that `comtrade_preflight` is the only rule safe to run.
-`comtrade_download` spends your key's daily quota, which is a paid quota on
-premium.
-
 ## Parameters
 
 Everything is in [config/config.yaml](config/config.yaml), commented.
@@ -176,7 +161,7 @@ Everything is in [config/config.yaml](config/config.yaml), commented.
 Fixed outside the config, in `FIXED` in
 [comtrade_common.py](workflow/scripts/comtrade_common.py): `typeCode=C`
 (goods), `breakdownMode=classic`, `customsCode`/`motCode`/`maxRecords`/
-`proxy_url` at `None`. A parameter that never varies is a parameter to delete.
+`proxy_url` at `None`.
 
 Two explicit refusals:
 
@@ -240,27 +225,29 @@ One per data file. The resolved parameters on one side, the upstream state of
 the data on the other: `classificationCode`, `totalRecords`,
 `datasetChecksum` and `lastReleased` per (reporter, period).
 
-That second half is the least obvious and the most useful, because **Comtrade
-rewrites history**. France 2020 was published on 2021-05-26, then revised on
+That second half is the most useful, because **Comtrade rewrites history**.
+For instance, French trade in 2020 was published on 2021-05-26, then revised on
 2026-05-23. Without this record, two runs of the same parameters that diverge
-are inexplicable, and you start suspecting your own code. `datasetChecksum` is
-the strongest anchor: unchanged means identical data.
+are inexplicable, and one may start suspecting his own code. `datasetChecksum`
+is the strongest anchor: unchanged means identical data.
 
 The API key never appears in it.
 
-## Reading the CSV (Stata, R)
+## Reading the CSV
 
-CSV is the only format that both Stata and R read without installing a
-package. It has two costs.
+The workflow produces the data in two file formats: csv and parquet. Using the
+CSV file instead of the parquet one has two costs.
 
 **Size**: roughly 11x the parquet.
 
-**Lost types**: `"01"` read back becomes `1`. The pipeline never reads the CSV,
-since parquet is canonical, but your colleagues will:
+**Lost types**: `"01"` read back becomes `1`.
+
+When reading the CSV file on, for instance, R or Stata, beware to use:
 
 ```r
 read.csv("file.csv", colClasses = c(cmdCode = "character"))
 ```
+
 ```stata
 import delimited "file.csv", stringcols(_all)
 ```
@@ -271,11 +258,11 @@ needed.
 
 ## Mirror flows
 
-A bilateral flow is declared twice: by the exporter (`X`) and by the importer
+A bilateral flow is reported twice: by the exporter (`X`) and by the importer
 (`M`). The mirror file puts them side by side, suffixed `_exp` and `_imp`, one
 row per directed edge `(period, cmdCode, exporterISO, importerISO)`.
 
-Two non-negotiable rules:
+Two non-negotiable rules apply:
 
 - **No reconciliation.** No FOB/CIF averaging, no substituting one side for the
   other. The gap between the two declarations is a data quality signal.
@@ -324,3 +311,28 @@ packing, and that `TOTAL` and `hs_revision: auto` are both refused.
   rewriting submit / check / download by hand.
 - **other sources**: World Bank, FAOSTAT. Same contract: free preflight, dated
   file, sidecar.
+- **download checks**: reconcile what came back with what was planned. Part of
+  this exists. `comtrade_download.py` fails hard at the ceiling, warns on a
+  pack that returns zero rows, and warns when a requested period is absent
+  from the result. The reconciliation itself does not: the plan holds a free
+  count for every period and nothing compares it to the rows received, the
+  total is never checked against `expected_rows_total`, and the requested
+  codes, flows and reporters are never checked for presence. Two cautions for
+  whoever picks this up. `totalRecords` from the availability endpoint counts
+  the whole reporter-period dataset, not our commodity selection, so it is not
+  a valid baseline; the preview counts are. And a gap is not automatically a
+  bug, because Comtrade can revise upstream between the preflight and the
+  download. That is what `datasetChecksum` is recorded for, so re-reading it
+  after the download would tell a revision apart from a lost pack.
+- **compare with `comtradr`**:
+  [comtradr](https://docs.ropensci.org/comtradr/index.html) (rOpenSci) wraps
+  the same API in R, with `ct_get_data()`, `ct_commodity_lookup()`,
+  `ct_get_ref_table()`, `ct_get_bulk()` for premium bulk files, and a key read
+  from `set_primary_comtrade_key()` or `COMTRADE_PRIMARY`. Its docs state a
+  limit this workflow knows nothing about: "You can request a maximum interval
+  of twelve years from the API." If that applies to `data/v1/get`, a pack also
+  has a length ceiling, independent of the row ceiling, and `pack_periods()`
+  should cap at twelve periods. Unverified here, and worth settling first,
+  since a low-volume selection would happily pack twenty years into one call.
+  Its "Querying large amounts of data" and caching articles are the other
+  reason to read it.

@@ -166,6 +166,15 @@ sidecar's `datasetChecksum` settles it.
 - **`mapping`**: `hs_revision: auto` and HS to FAO. Needs a correspondence
   table per revision. In `strict`, a code absent from a revision returns zero
   rows and produces a warning, nothing more.
+- **download checks**: the plan's per-period counts are never compared to the
+  rows received, nor the total to `expected_rows_total`. Only the ceiling,
+  empty packs and absent periods are caught today. The availability
+  `totalRecords` is not a usable baseline (whole reporter-period, not our
+  codes); the preview counts are. See README for the full note.
+- **compare with `comtradr`**: the R wrapper over the same API
+  (https://docs.ropensci.org/comtradr/). Its docs state a maximum interval of
+  twelve years per request. If that holds for `data/v1/get`, `pack_periods()`
+  needs a length cap as well as a row cap. Unverified.
 - **async**: to open only if a legitimate selection goes over 250K.
 - **other sources**: World Bank, FAOSTAT. Same contract: free preflight, dated
   file, sidecar.
