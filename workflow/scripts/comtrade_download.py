@@ -29,6 +29,7 @@ from comtrade_common import (  # noqa: E402
     pseudo_codes,
     selection,
 )
+from comtrade_polars import drop_pseudo  # noqa: E402
 
 logging.basicConfig(
     filename=snakemake.log[0],
@@ -115,23 +116,13 @@ if params["exclude_pseudo"]:
     # residuals, Bunkers, Free Zones, and the territories with no ISO3.
     # Code 490 is KEPT: it is Taiwan, a single reporting economy.
     #
-    # Keyed on the CODE columns, not the ISO ones: with include_desc: false
-    # there are no ISO columns at all.
-    pseudo = pseudo_codes()
-    sides = [c for c in ("reporterCode", "partnerCode", "partner2Code")
-             if c in data.columns]
-    is_pseudo = pl.any_horizontal(
-        [pl.col(c).cast(pl.String).is_in(pseudo) for c in sides]
-    )
-    for side in sides:
-        counts = (
-            data.filter(pl.col(side).cast(pl.String).is_in(pseudo))
-            .group_by(side).len().sort("len", descending=True)
-        )
-        for row in counts.iter_rows():
-            dropped_pseudo[f"{side}={row[0]}"] = row[1]
+    # The logic is in comtrade_polars.drop_pseudo, which has a self-check: a
+    # `script:` file like this one cannot be imported, so nothing here is
+    # testable. That is not theoretical — the first version of this filter
+    # looked at partner2Code and emptied the whole dataset.
+    data, pseudo_report = drop_pseudo(data, pseudo_codes())
+    dropped_pseudo = pseudo_report["dropped"]
 
-    data = data.filter(~is_pseudo)
     logging.info("exclude_pseudo: %d rows -> %d (%d dropped)",
                  rows_received, data.height, rows_received - data.height)
     for key, n in sorted(dropped_pseudo.items(), key=lambda kv: -kv[1]):

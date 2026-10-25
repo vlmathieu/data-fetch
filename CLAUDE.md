@@ -8,15 +8,14 @@ it says what the repo does and why. This file says how to work in it.
 | Rule | State |
 |---|---|
 | `comtrade_preflight` | **verified end to end** against the real API |
-| `comtrade_download` | **never run**, requires an API key |
-| `comtrade_mirror` | **never run**, depends on the output of `download` |
-| `comtrade_eu` | **never run**, same reason |
+| `comtrade_download` | **verified end to end** on 2026-10-25, free key, 1 call |
+| `comtrade_mirror` | **verified end to end** on the same run |
+| `comtrade_eu` | **never run**: needs `aggregate_eu: true`, only self-checked |
 
-Syntax validated and DAG valid for all four, but that is not the same as
-running them. The first real download is the user's to make. **Never claim that
-`download`, `mirror` or `eu` works**: say that they have not been run. In
-particular, `exclude_pseudo` and the EU aggregation are verified only by their
-self-checks, never against a downloaded file.
+The first real download happened on 2026-10-25: 2000-2003, code 4403, M+X, all
+reporters. It found a bug the self-checks could not (see `partner2Code` in the
+gotchas). **`comtrade_eu` has still never run**: say that it has not, rather
+than that it works.
 
 ## Commands
 
@@ -154,6 +153,14 @@ All found by running things, not by rereading them.
   and catches real places that merely lack an ISO3 (Kosovo, Channel Islands).
   UNSD's own `isGroup` marks 4 areas out of 312. Do not "simplify" it to a
   regex: the previous repo's `excluded_iso: ['XX','_X','\d']` missed the EU.
+- **`partner2Code` is `0` on EVERY row when partner2 is not requested**, and
+  `0` is the code of "World". It is a "not applicable" placeholder, not an
+  aggregate. Filtering `exclude_pseudo` on it dropped 16,934 rows out of
+  16,934 on the first real download. Hence `PSEUDO_SIDES` in
+  `comtrade_polars.py`, which lists `reporterCode` and `partnerCode` and
+  deliberately **not** `partner2Code`. Do not "complete" that tuple.
+  The lesson is more general: a code is not an aggregate just because it
+  appears in the areas table.
 - **`490` is Taiwan** and `exclude_pseudo` keeps it. UNSD cannot name it, so
   publishes it as "Other Asia, nes". A single reporting economy, not a sum of
   countries. Do not fold it into the aggregates because its label looks like
@@ -239,8 +246,25 @@ Default config (1996-2023, codes 4403/4407/4412, M+X, all reporters):
     2017-2019 → 64,248 | 2020-2022 → 62,004 | 2023      → 20,641
   packs, premium (records_per_call 250000, packing under 200,000): 3 calls
     1996-2006 → 187,296 | 2007-2015 → 184,257 | 2016-2023 → 168,107
+```
+
+First real download, 2026-10-25, free key, hash 947dc53d:
+
+```
+2000-2003, code 4403, M+X, all reporters   4 free counting calls, 1 keyed call
+  per year: 4,219 | 4,182 | 4,211 | 4,322
+  expected 16,934  ->  RECEIVED 16,934     exact, the plan predicts the download
+  exclude_pseudo: 16,934 -> 15,630 (1,304 dropped, 7.7%)
+    partner 0 World 1,129 | 899 Areas nes 124 | 838 Free Zones 18
+    568 Other Europe nes 11 | 577 Other Africa nes 6 | 837 Bunkers 6
+  delivered: 175 reporters, 223 partners, 47 columns, Taiwan (490) present
+  mirror: 10,996 directed edges, 4,634 (42%) declared on both sides,
+          3,984 with no exporter declaration, 2,378 with no importer one
+```
 
 Orders of magnitude, all reporters, M+X:
+
+```
   France 2015, ALL products  → 674,847   (hence the refusal of cmd: TOTAL)
   23 wood codes, 1996         →  33,092
   56 wood codes, 2017         →  95,289

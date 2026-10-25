@@ -74,6 +74,59 @@ def guarded_sum(column: str) -> pl.Expr:
     )
 
 
+# --- pseudo-country filter --------------------------------------------------
+# The sides the filter looks at. partner2Code is DELIBERATELY ABSENT, and that
+# absence is the whole point of this constant existing:
+#
+# when partner2 is not requested, Comtrade fills partner2Code with 0 on every
+# row, and 0 is the code of "World". Filtering on it dropped 16,934 rows out of
+# 16,934 on the first real download (2026-10-25). The 0 there is a
+# "not applicable" placeholder, not an aggregate.
+#
+# Keyed on the CODE columns and not the ISO ones, because include_desc: false
+# delivers no ISO columns at all.
+PSEUDO_SIDES = ("reporterCode", "partnerCode")
+
+
+def drop_pseudo(data: pl.DataFrame, pseudo: frozenset[str] | set[str]
+                ) -> tuple[pl.DataFrame, dict]:
+    """Drops the rows whose reporter or partner is not a country.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received from the API, holding at least one of PSEUDO_SIDES.
+    pseudo : set of str
+        Numeric codes to drop, as strings. From comtrade_common.pseudo_codes():
+        aggregates and territories with no ISO3, Taiwan (490) excluded.
+
+    Returns
+    -------
+    (kept, report) : tuple
+        kept : polars dataframe
+            The rows whose every checked side is a real country.
+        report : dict
+            'rows_in', 'rows_out', 'dropped' ({'partnerCode=0': 1129, ...}),
+            so the log and the sidecar can name what went and why.
+    """
+    sides = [c for c in PSEUDO_SIDES if c in data.columns]
+    dropped: dict[str, int] = {}
+    for side in sides:
+        counts = (
+            data.filter(pl.col(side).cast(pl.String).is_in(pseudo))
+            .group_by(side).len().sort("len", descending=True)
+        )
+        for code, n in counts.iter_rows():
+            dropped[f"{side}={code}"] = n
+
+    is_pseudo = pl.any_horizontal(
+        [pl.col(c).cast(pl.String).is_in(pseudo) for c in sides]
+    )
+    kept = data.filter(~is_pseudo)
+    return kept, {"rows_in": data.height, "rows_out": kept.height,
+                  "dropped": dropped}
+
+
 # --- EU aggregation ---------------------------------------------------------
 
 def eu_membership(resolve_areas=None) -> pl.DataFrame:
@@ -366,6 +419,41 @@ def _demo() -> None:
     ]), members)
     assert "isReported" in report["columns_dropped"], report["columns_dropped"]
     assert "reporterCode" in report["columns_dropped"]
+
+    # --- pseudo-country filter ---
+    pseudo = {"0", "97", "899", "837"}       # World, EU, Areas nes, Bunkers
+
+    def rows(**over) -> pl.DataFrame:
+        """Two trade rows, overridable, with the columns the filter reads."""
+        base = {"reporterCode": 251, "partnerCode": 842, "partner2Code": 0,
+                "primaryValue": 1.0}
+        return pl.DataFrame([{**base, **over}, {**base, **over}])
+
+    # REGRESSION, found on the first real download (2026-10-25): partner2Code
+    # is 0 on EVERY row when partner2 is not requested, and 0 is World's code.
+    # Filtering on it emptied the whole dataset, 16,934 rows out of 16,934.
+    kept, report = drop_pseudo(rows(), pseudo)
+    assert kept.height == 2, "partner2Code=0 must not drop a row"
+    assert report["dropped"] == {}, report["dropped"]
+
+    # A real aggregate on either side does go.
+    kept, report = drop_pseudo(rows(partnerCode=0), pseudo)
+    assert kept.height == 0 and report["dropped"] == {"partnerCode=0": 2}
+    kept, _ = drop_pseudo(rows(reporterCode=97), pseudo)
+    assert kept.height == 0, "the EU aggregate reporter must go"
+
+    # Taiwan stays: it is not in the pseudo set.
+    assert drop_pseudo(rows(partnerCode=490), pseudo)[0].height == 2
+
+    # Mixed rows: only the offending ones go, and the report counts them.
+    mixed = pl.concat([rows(), rows(partnerCode=899)])
+    kept, report = drop_pseudo(mixed, pseudo)
+    assert (kept.height, report["rows_in"]) == (2, 4), (kept.height, report)
+    assert report["dropped"] == {"partnerCode=899": 2}
+
+    # No ISO columns (include_desc: false) must still work: codes only.
+    no_iso = rows().drop("partner2Code")
+    assert drop_pseudo(no_iso, pseudo)[0].height == 2
 
     # The real membership file parses and resolves.
     real = eu_membership()
