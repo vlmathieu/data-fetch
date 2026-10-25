@@ -123,10 +123,23 @@ export comtrade_apikey="your-key"
 snakemake --sdm conda --cores 1
 ```
 
-*For MacOS users*: To avoid retyping it every session, zsh will read it from
-`~/.zshrc`, but it is then in cleartext in a file and present in the environment
-of every process you run. Better: keep it in the macOS Keychain and pull it out
-on demand.
+**Which file, if you want it to persist.** This is where it usually goes wrong:
+
+| File | Read by | Good for |
+|---|---|---|
+| `~/.zshrc` | **interactive** shells only | running `snakemake` yourself from a terminal |
+| `~/.zshenv` | **every** zsh, interactive or not | scripts, CI, an agent running commands for you |
+| a file of your own | nothing, unless `~/.zshrc` sources it | nothing. A silent dead end |
+
+A missing key fails at `comtrade_download` with an explicit message, never a
+bare `KeyError`. And it fails there and nowhere earlier, because that rule is
+the only one that needs it: the preflight, the mirror and the EU aggregation all
+run without. Nothing is wasted when it happens — the plan is already written and
+the counting calls were free.
+
+*For MacOS users*: `~/.zshrc` keeps the key in cleartext in a file and in the
+environment of every process you run. Better: keep it in the macOS Keychain and
+pull it out on demand.
 
 ```zsh
 # once
@@ -139,7 +152,7 @@ export comtrade_apikey="$(security find-generic-password -a "$USER" -s comtrade_
 On Linux, `pass` with gpg-agent plays the same role; `op read "op://…"` with the
 1Password CLI works everywhere.
 
-The API key is then read **inside** `comtrade_download.py.
+The API key is then read **inside** `comtrade_download.py`.
 
 ### Checking without spending quota
 

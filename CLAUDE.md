@@ -248,7 +248,16 @@ pinned).
   `.snakemake/metadata/`. That is exactly the leak found in
   `trade_network_analysis`.
 - **No `envvars:` directive** in the Snakefile, on purpose: it would make the
-  whole workflow fail without a key, preflight included.
+  whole workflow fail without a key, preflight included. `trade_network_analysis`
+  does declare it, and the price is visible in its Dockerfile:
+  `ENV comtrade_apikey=unused-by-default`, a dummy value whose only job is to
+  satisfy the parse check so that rules needing no key can run at all. Verified
+  here on 2026-10-25: `comtrade_eu` ran with the variable absent from the
+  environment. Do not "harden" this by adding `envvars:`.
+  The trade-off is that a missing key surfaces at `comtrade_download` rather
+  than before the DAG. That is paid for by an explicit message in the script,
+  not by a bare `KeyError`, and nothing is lost when it fires: the plan is
+  written and the counting calls were free.
 - **`comtrade_preflight` is the only rule an agent can run without risk**:
   public endpoints, no key, no quota. `comtrade_download` spends the key's
   daily quota (500 calls/day free, paid on premium), so do not run it without

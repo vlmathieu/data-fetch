@@ -43,7 +43,28 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-APIKEY = os.environ["comtrade_apikey"]
+try:
+    APIKEY = os.environ["comtrade_apikey"]
+except KeyError:
+    # A bare KeyError says nothing about what to do. No `envvars:` directive
+    # guards this upstream, on purpose: it would make the WHOLE workflow refuse
+    # to start without a key, preflight included, and preflight needs none.
+    raise RuntimeError(
+        "comtrade_apikey is not set in the environment.\n"
+        "\n"
+        "comtrade_download is the ONLY rule that needs it. preflight, mirror "
+        "and eu run without, so nothing before this point was wasted: the "
+        "plan.json is on disk and the counting calls were free.\n"
+        "\n"
+        "  export comtrade_apikey='...'      # this shell only\n"
+        "\n"
+        "To keep it across sessions, put that line in ~/.zshrc, not in a file "
+        "of your own that nothing sources. Beware: ~/.zshrc is read only by "
+        "INTERACTIVE shells. A script, a CI job or an agent runs a "
+        "non-interactive shell, which reads ~/.zshenv instead.\n"
+        "\n"
+        "Free key: https://comtradedeveloper.un.org/ (see README, 'API key')."
+    ) from None
 
 
 def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
