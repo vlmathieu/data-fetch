@@ -1,12 +1,13 @@
 """data-fetch: dated, traceable data downloads.
 
 Source present: UN Comtrade. The repo is built to take others. One source is
-one rules file plus one config block, without touching the rest.
-"""
+one rules file plus one config block, without touching the rest: see the
+contract at the top of rules/common.smk.
 
-import sys
-from datetime import datetime
-from pathlib import Path
+Assembly only. The derivation config -> params -> fingerprint -> stem ->
+targets lives in each source's `plan()`, in workflow/scripts/, where a
+`_demo()` can test it.
+"""
 
 from snakemake.utils import min_version
 
@@ -14,51 +15,16 @@ min_version("8.16.0")
 
 configfile: "config/config.yaml"
 
-sys.path.insert(0, str(Path(workflow.basedir) / "scripts"))
-from comtrade_common import resolve_params, params_hash, stem
-
-CT = config["comtrade"]
-PARAMS = resolve_params(CT)
-HASH = params_hash(PARAMS)
-
-# Run identifier. Omitted, it is the current timestamp: every invocation then
-# produces a new file, and nothing is ever overwritten.
-#   snakemake                                   -> new run
-#   snakemake --config run_id=20261024T143000   -> targets an existing run, so
-#                                                  reproducible, and the
-#                                                  downstream rules are skipped
-RUN_ID = str(config.get("run_id") or datetime.now().strftime("%Y%m%dT%H%M%S"))
-STEM = stem(PARAMS, RUN_ID)
-
-OUT = "data/comtrade"
-
-FORMATS = [f.lower() for f in CT.get("format", ["parquet"])]
-if "parquet" not in FORMATS:
-    # Canonical artifact: types intact, and the only format read internally
-    # (the mirror starts from the parquet, never from the CSV).
-    FORMATS.insert(0, "parquet")
-
-CSV_SEP = str(CT.get("csv_sep", ","))
-
+# Order matters: common.smk sets up sys.path and RUN_ID, which every source
+# needs, and declares the TARGETS list they append to.
+include: "rules/common.smk"
 include: "rules/comtrade.smk"
 
 
-def targets():
-    out = [f"{OUT}/{STEM}.{fmt}" for fmt in FORMATS]
-    out.append(f"{OUT}/{STEM}.meta.json")
-    if CT.get("mirror"):
-        out += [f"{OUT}/{STEM}.mirror.{fmt}" for fmt in FORMATS]
-    if CT.get("aggregate_eu"):
-        out += [f"{OUT}/{STEM}.eu.{fmt}" for fmt in FORMATS]
-    return out
-
-
 rule all:
+    # Declared AFTER the includes, so TARGETS is complete by now. Without this
+    # directive Snakemake would take the first rule it parsed as the default
+    # target, which would be comtrade_preflight.
+    default_target: True
     input:
-        targets()
-
-
-rule preflight:
-    """Short target: `snakemake preflight` sizes the run without downloading."""
-    input:
-        f"{OUT}/{STEM}.plan.json"
+        TARGETS

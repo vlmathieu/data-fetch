@@ -39,9 +39,12 @@ Any non-trivial logic added to either module leaves an `assert` behind.
 ## Architecture
 
 ```
-Snakefile ──(import at DAG time)──> comtrade_common.resolve_params, params_hash, stem
-    │                                └─ sets STEM, hence every output path
+Snakefile                  assembly only: include order, `rule all`
+    ├─ include rules/common.smk    sys.path, RUN_ID, TARGETS = []
     └─ include rules/comtrade.smk
+         CT = plan(config["comtrade"], RUN_ID)   ← AT DAG TIME
+         TARGETS += CT["targets"]                  sets STEM, hence every path
+         preflight           short target, no output
          comtrade_preflight  → {STEM}.plan.json          PUBLIC endpoints, off quota
          comtrade_download   → {STEM}.{parquet,csv} + {STEM}.meta.json   keyed quota
          comtrade_mirror     → {STEM}.mirror.{parquet,csv}
@@ -51,6 +54,22 @@ resources/                 versioned, NOT fetched at runtime
   comtrade_areas.{json,csv}   312 areas: code, iso3, desc, kind  (generated)
   eu_membership.csv           dated EU membership, keyed on ISO3  (by hand)
 ```
+
+**The split is about what can be tested**, and it decides where new code goes:
+
+| | Holds | Testable |
+|---|---|---|
+| `.py` | logic | **yes**, importable: `_demo()` |
+| `.smk` | wiring: paths, rules | no |
+| `Snakefile` | assembly | no |
+
+So anything non-trivial belongs in a `.py`. `plan()` exists for exactly that
+reason: the parquet forcing and the target list used to live in the Snakefile,
+where no assert could reach them.
+
+Adding a source: a config block, a `plan()` in its own module, a
+`rules/<source>.smk` doing `TARGETS += ...`, and one `include:` line. The
+contract is at the top of `rules/common.smk`.
 
 **Two shared modules, and the split matters:**
 
@@ -81,6 +100,29 @@ All found by running things, not by rereading them.
 - **`--config` swallows every argument that follows.** The target goes
   **before**: `snakemake preflight --cores 1 --config run_id=…`, never the
   other way round.
+- **`--config` only writes TOP-LEVEL keys, and the config is nested.** This is
+  the more expensive of the two traps, because it is silent.
+  `--config aggregate_eu=true` puts the key *next to* `comtrade:` rather than
+  inside it, and `--config comtrade.aggregate_eu=true` creates a key literally
+  named `"comtrade.aggregate_eu"`. Both run with the old value and say nothing.
+  The working form passes YAML, and Snakemake **merges** it into the block
+  instead of replacing it, so the other keys survive (verified):
+  `--config comtrade='{"aggregate_eu": true}'`.
+  **The intended way to change a parameter is to edit `config/config.yaml` and
+  run again**: the fingerprint changes, so the new dataset lands beside the old
+  one. Do not propose flattening the config to work around this — its nesting
+  is what makes it readable and what will let `worldbank:` sit beside
+  `comtrade:`. `run_id` is read at the top level on purpose, and is the one
+  override meant for the command line.
+- **A rule's f-strings are evaluated when the rule is PARSED**, not at job
+  time. That is what makes the short names (`STEM`, `OUT`, `FORMATS`) safe when
+  several sources are included: a later `include` reassigning them cannot
+  affect rules already declared. Do not turn them into job-time lambdas
+  without rethinking that.
+- **`rule all` sits after the includes and needs `default_target: True`.**
+  Without the directive Snakemake takes the first rule it parsed as the
+  default, which would be `preflight`. Moving `rule all` to the top is not the
+  fix: `TARGETS` is still empty there.
 - **`_getFinalDataAvailability(typeCode, freqCode, clCode, period, reporterCode)`**:
   `typeCode` comes first. Forgetting it only raises at runtime.
 - **Output paths depend on `params_hash`, computed at DAG time.** Touching

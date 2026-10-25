@@ -1,3 +1,28 @@
+from comtrade_common import plan
+
+# One call derives everything from the config block: resolved request,
+# fingerprint, stem, formats, and the files to produce. Its refusals (cmd
+# TOTAL, an unknown ISO3, a ceiling above the tier) fire HERE, at DAG time,
+# before a single row is downloaded.
+CT = plan(config["comtrade"], RUN_ID)
+TARGETS += CT["targets"]
+
+# Short names, for the rules below to stay readable. Safe even with several
+# sources: a rule's f-strings are evaluated when the rule is PARSED, so a
+# later include reassigning these names cannot affect rules already declared.
+PARAMS, STEM, OUT = CT["params"], CT["stem"], CT["out"]
+FORMATS, CSV_SEP = CT["formats"], CT["csv_sep"]
+
+
+rule preflight:
+    """Short target: `snakemake preflight` sizes the run without downloading.
+
+    Comtrade-specific, hence here rather than in the Snakefile.
+    """
+    input:
+        f'{OUT}/{STEM}.plan.json'
+
+
 rule comtrade_preflight:
     """Counts rows and records the vintage. Public endpoints: off quota.
 

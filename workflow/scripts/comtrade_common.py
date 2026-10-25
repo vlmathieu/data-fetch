@@ -497,6 +497,94 @@ def stem(params: dict, run_id: str) -> str:
     )
 
 
+# --- delivery: what the rules need ------------------------------------------
+# resolve_params describes the REQUEST, which is what gets hashed. plan()
+# describes the DELIVERY: file formats, separator, output paths. Hence the
+# keys read here come from the raw config rather than from params, and they
+# are the ones listed in _NOT_IN_HASH.
+
+def _formats(cfg: dict) -> list[str]:
+    """File formats to write, parquet first and always present.
+
+    parquet is forced in even when the config does not ask for it: it is the
+    canonical artifact (types intact), and it is the only format read
+    internally, by comtrade_mirror and comtrade_eu. Without this, asking for
+    `format: [csv]` together with `mirror: true` would declare a rule whose
+    input file is never produced.
+
+    Parameters
+    ----------
+    cfg : dict
+        Raw config section. Reads cfg['format'], defaulting to ['parquet'].
+
+    Returns
+    -------
+    list of str
+        Lowercased formats, 'parquet' first, no duplicates.
+    """
+    formats = [str(f).lower() for f in _default(cfg.get("format"), ["parquet"])]
+    if "parquet" not in formats:
+        formats.insert(0, "parquet")
+    return formats
+
+
+def plan(cfg: dict, run_id: str, out_dir: str = "data/comtrade") -> dict:
+    """Everything a rules file needs, derived from one config section.
+
+    Called once at DAG time by rules/comtrade.smk, which unpacks it. Keeping it
+    here rather than in the Snakefile has one concrete benefit: the parquet
+    forcing and the target list become testable by _demo(), which cannot reach
+    into a Snakefile.
+
+    Parameters
+    ----------
+    cfg : dict
+        Raw 'comtrade' section of config/config.yaml.
+    run_id : str
+        Run timestamp, YYYYMMDDTHHMMSS, shared by every source of one
+        invocation.
+    out_dir : str, optional
+        Directory the files land in, 'data/comtrade' by default.
+
+    Returns
+    -------
+    dict
+        params : the resolved request, as resolve_params returns it
+        stem : shared file stem, fingerprint included
+        out : out_dir, unchanged
+        formats : from _formats()
+        csv_sep : separator for the CSV outputs
+        targets : every file this source must produce, for `rule all`
+
+    Raises
+    ------
+    ValueError, NotImplementedError
+        Any refusal of resolve_params. They fire HERE, at DAG time, before a
+        single row is downloaded.
+    """
+    params = resolve_params(cfg)
+    file_stem = stem(params, run_id)
+    formats = _formats(cfg)
+
+    targets = [f"{out_dir}/{file_stem}.{fmt}" for fmt in formats]
+    targets.append(f"{out_dir}/{file_stem}.meta.json")
+    # Derived files: each adds outputs next to the canonical one without
+    # changing it, which is why neither flag is in the params hash.
+    if _default(cfg.get("mirror"), False):
+        targets += [f"{out_dir}/{file_stem}.mirror.{fmt}" for fmt in formats]
+    if _default(cfg.get("aggregate_eu"), False):
+        targets += [f"{out_dir}/{file_stem}.eu.{fmt}" for fmt in formats]
+
+    return {
+        "params": params,
+        "stem": file_stem,
+        "out": out_dir,
+        "formats": formats,
+        "csv_sep": str(_default(cfg.get("csv_sep"), ",")),
+        "targets": targets,
+    }
+
+
 # --- call wrapper -----------------------------------------------------------
 
 def call(fn, *args, attempts: int = 5, base_delay: float = 5.0,
@@ -826,6 +914,51 @@ def _demo() -> None:
         json.dumps({k: v for k, v in a.items() if k not in _NOT_IN_HASH},
                    sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()[:8]
+
+    # --- delivery: formats and targets ---
+    # Until these moved out of the Snakefile, nothing could check them.
+    assert _formats({}) == ["parquet"], "parquet is the default"
+    # parquet is forced in, FIRST, even when only csv is asked for: the mirror
+    # and the EU aggregation read the parquet and never the CSV.
+    assert _formats({"format": ["csv"]}) == ["parquet", "csv"]
+    # Case is normalized, and parquet is not duplicated when already there.
+    assert _formats({"format": ["PARQUET", "CSV"]}) == ["parquet", "csv"]
+    assert _formats({"format": ["csv", "parquet"]}) == ["csv", "parquet"]
+    assert _formats({"format": None}) == ["parquet"], "empty key means default"
+
+    run = "20261025T120000"
+    delivery = plan({**base, "format": ["parquet", "csv"]}, run)
+    assert delivery["stem"] == stem(delivery["params"], run), "stem diverged"
+    assert delivery["csv_sep"] == ","
+    assert delivery["out"] == "data/comtrade"
+    assert plan(base, run, out_dir="elsewhere")["out"] == "elsewhere"
+
+    # The canonical files are always targets; the derived ones only on demand.
+    def names(cfg: dict) -> set[str]:
+        """Target file names, stripped of their directory and stem."""
+        got = plan(cfg, run)
+        return {t.rsplit(got["stem"], 1)[-1] for t in got["targets"]}
+
+    plain = {**base, "format": ["parquet", "csv"]}
+    assert names(plain) == {".parquet", ".csv", ".meta.json"}, names(plain)
+    assert names({**plain, "mirror": True}) == {
+        ".parquet", ".csv", ".meta.json", ".mirror.parquet", ".mirror.csv"}
+    assert names({**plain, "aggregate_eu": True}) == {
+        ".parquet", ".csv", ".meta.json", ".eu.parquet", ".eu.csv"}
+    assert names({**plain, "mirror": False, "aggregate_eu": False}) \
+        == {".parquet", ".csv", ".meta.json"}, "a derived file slipped in"
+
+    # A derived file must not change the request, so not the stem either.
+    assert plan({**plain, "aggregate_eu": True}, run)["stem"] \
+        == plan(plain, run)["stem"], "aggregate_eu moved the stem"
+
+    # plan() delegates the refusals: a bad config must not reach the API.
+    try:
+        plan({**base, "cmd": ["TOTAL"]}, run)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("plan() should delegate the refusals")
 
     # Packing: sum under the limit, chronological order preserved.
     counts = {"1996": 90, "1997": 90, "1998": 90, "1999": 10}

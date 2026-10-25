@@ -154,6 +154,35 @@ cat data/comtrade/*.plan.json
 The plan gives the expected row count, the packing it settled on, and how many
 keyed calls the run will cost.
 
+## Layout
+
+```
+config/config.yaml           the only file you edit
+resources/                   reference tables, versioned (see its README)
+workflow/
+  Snakefile                  assembly: include order, default target
+  rules/
+    common.smk               what every source shares: RUN_ID, TARGETS
+    comtrade.smk             the Comtrade rules
+  scripts/
+    comtrade_common.py       logic: resolve, hash, stem, plan, areas
+    comtrade_polars.py       logic: guarded sums, EU aggregation
+    comtrade_*.py            the rule scripts themselves
+```
+
+The division is deliberate, and it is about what can be tested:
+
+| | Holds | Testable |
+|---|---|---|
+| `.py` | logic | **yes**, it is importable: `_demo()` |
+| `.smk` | wiring: paths, rules | no |
+| `Snakefile` | assembly | no |
+
+So anything non-trivial goes in a `.py`. Adding a source is a config block, a
+`plan()` in its own module, and a rules file — the Snakefile gains one
+`include:` line. The contract is written at the top of
+[workflow/rules/common.smk](workflow/rules/common.smk).
+
 ## Parameters
 
 Everything is in [config/config.yaml](config/config.yaml), commented.
@@ -178,6 +207,69 @@ Explicit refusals, all raised at DAG time, before anything is downloaded:
 A key left **empty** in the YAML (`flow:` followed by nothing) means "use the
 default", exactly like a missing key. It parses to `None`, and without that
 rule `flow:` would have meant *every* flow instead of `M, X`.
+
+### Changing the parameters
+
+**Edit [config/config.yaml](config/config.yaml) and run again.** That is the
+normal way to work here, not a workaround.
+
+It is safe, because the parameters are part of the file name. Change the
+classification, the codes or the periods, and the fingerprint changes with
+them: the new dataset lands **beside** the old one instead of overwriting it,
+and both stay readable, dated and comparable.
+
+```zsh
+snakemake --sdm conda --cores 1          # HS, codes 4403/4407/4412 -> ac3dd013
+# edit classification: H5 in config/config.yaml
+snakemake --sdm conda --cores 1          # -> 90d0fcaa, next to the first one
+
+ls data/comtrade/*.parquet | cut -d_ -f4 | sort -u   # the requests you hold
+```
+
+So keeping two versions of a dataset is not a matter of naming files carefully:
+it is the default behaviour.
+
+#### Why not `--config`
+
+`--config` writes **top-level keys only**. The config is nested, so it cannot
+reach inside a source block:
+
+```zsh
+snakemake --config aggregate_eu=true            # IGNORED, no warning
+snakemake --config comtrade.aggregate_eu=true   # IGNORED too, no warning
+```
+
+Both run happily with the old value. The first puts `aggregate_eu` next to
+`comtrade:` rather than inside it; the second creates a key literally named
+`"comtrade.aggregate_eu"`. Nothing reads either, and nothing says so.
+
+The form that does work passes YAML, and Snakemake merges it into the block
+rather than replacing it, so the other keys survive:
+
+```zsh
+snakemake --config comtrade='{"aggregate_eu": true}'   # works
+```
+
+It is still not the recommended path: it is easy to mistype, it leaves no trace
+of what was asked, and the sidecar is then the only record of the real
+parameters. Edit the config file instead.
+
+`run_id` is the exception, and the only one. It is read at the **top level** of
+the config precisely so that it can be overridden from the command line, which
+is what makes step 3 of [Getting started](#getting-started) work.
+
+> The config keeps its nesting on purpose: `comtrade:` grouping its own
+> parameters is what makes the file readable, and what will let `worldbank:`
+> sit beside it. The answer to the `--config` limitation is to edit the file,
+> not to flatten it.
+
+One trap left, about the command line itself: **`--config` swallows every
+argument that follows it**, so the target goes *before*.
+
+```zsh
+snakemake preflight --cores 1 --config run_id=20261024T120000   # correct
+snakemake --config run_id=20261024T120000 preflight             # target eaten
+```
 
 ## Choosing countries
 
