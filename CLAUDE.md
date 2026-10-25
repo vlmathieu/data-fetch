@@ -12,6 +12,10 @@ it says what the repo does and why. This file says how to work in it.
 | `comtrade_mirror` | **verified end to end** on the same run |
 | `comtrade_eu` | **verified end to end** on 2026-10-25, 0 API calls |
 
+Everything above ran under Snakemake **8.25.5**. The preflight was also
+verified under **9.23.1**, with an identical plan; the other three have not
+been run under 9.
+
 All four rules have now run against real data. The first download, on
 2026-10-25 (2000-2003, code 4403, M+X, all reporters), found **two** bugs the
 self-checks could not — see `partner2Code` and the dtype trap in the gotchas.
@@ -94,6 +98,23 @@ therefore cannot carry a self-check.
 
 All found by running things, not by rereading them.
 
+- **Never import the `snakemake` object in a `script:` file.** The preamble
+  defines it as a global; take it from there. `from snakemake.script import
+  snakemake` worked under Snakemake 8 only because its preamble ALSO did
+  `script.snakemake = pickle.loads(...)`, setting it as a module attribute.
+  Snakemake 9 assigns the global directly and dropped that attribute, so the
+  import raises `ImportError: cannot import name 'snakemake'`. The import fails
+  standalone in both versions, 8 included: it was never an API. Hence the
+  `# noqa: F821` on the first use in each script — a linter cannot see the
+  preamble.
+- **Two Snakemake versions are in play here**, and they are not interchangeable
+  in their internals: `miniconda3` base has **8.25.5** (Python 3.12), the
+  `snakemake` conda env has **9.23.1** (Python 3.14). `min_version("8.16.0")`
+  accepts both, and the repo is kept compatible with both. The preflight was
+  verified under 9.23.1 and produces a plan **identical** to the one from
+  8.25.5, byte for byte on the request, the counts and the packs. `download`,
+  `mirror` and `eu` have only ever run under 8.25.5: say that, rather than that
+  they work under 9.
 - **Never `from __future__ import annotations` in a `script:` file.**
   Snakemake inserts a preamble before the file's content, so the import is no
   longer on the first line and you get a `SyntaxError`. The env is Python 3.12:

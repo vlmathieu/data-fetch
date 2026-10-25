@@ -19,7 +19,12 @@ from pathlib import Path
 
 import comtradeapicall
 import polars as pl
-from snakemake.script import snakemake
+# `snakemake` is NOT imported: the preamble Snakemake inserts above this file
+# defines it as a global. The old `from snakemake.script import snakemake` only
+# worked because Snakemake 8's own preamble also set it as a module attribute;
+# Snakemake 9 dropped that, so the import raises ImportError there. Relying on
+# the injected global works on both. Hence the noqa: F821 on its first uses --
+# a linter cannot see the preamble.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comtrade_common import (  # noqa: E402
@@ -32,7 +37,7 @@ from comtrade_common import (  # noqa: E402
 from comtrade_polars import drop_pseudo  # noqa: E402
 
 logging.basicConfig(
-    filename=snakemake.log[0],
+    filename=snakemake.log[0],  # noqa: F821
     level=logging.INFO,
     format="%(asctime)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",

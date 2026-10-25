@@ -5,21 +5,17 @@ key and off premium quota:
 
   - previewFinalData(..., countOnly=True) returns the REAL count, not capped.
     The "limited to 500 records" in the README applies only to data rows, not
-    to the scalar. Checked: France 2015, all products, gives 674,847, the same
-    as totalRecords from the availability endpoint.
+    to the scalar.
   - _getFinalDataAvailability gives classification, totalRecords, checksum and
     last release date per (reporter, period).
 
-So planning the packing optimally costs nothing. Only the download spends
-quota.
+Planning the packing optimally costs nothing. Only the download spends quota.
 
 Public endpoint limit: one period per call
 (`{"error":"Maximum number of periods for preview is 1"}`), hence one call per
-period. It does not matter, since it is free.
+period.
 """
 
-# No `from __future__ import annotations` here: Snakemake inserts a preamble
-# before this file, and a __future__ import has to be on the first line.
 # Python 3.12 handles `str | None` natively.
 import json
 import logging
@@ -28,7 +24,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import comtradeapicall
-from snakemake.script import snakemake
+# `snakemake` is NOT imported: the preamble Snakemake inserts above this file
+# defines it as a global. The old `from snakemake.script import snakemake` only
+# worked because Snakemake 8's own preamble also set it as a module attribute;
+# Snakemake 9 dropped that, so the import raises ImportError there. Relying on
+# the injected global works on both. Hence the noqa: F821 on its first uses --
+# a linter cannot see the preamble.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comtrade_common import (  # noqa: E402
@@ -43,7 +44,7 @@ from comtrade_common import (  # noqa: E402
 )
 
 logging.basicConfig(
-    filename=snakemake.log[0],
+    filename=snakemake.log[0],  # noqa: F821
     level=logging.INFO,
     format="%(asctime)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",

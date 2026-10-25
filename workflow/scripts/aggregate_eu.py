@@ -28,9 +28,14 @@ import os
 import sys
 from pathlib import Path
 
-from snakemake.script import snakemake
+# `snakemake` is NOT imported: the preamble Snakemake inserts above this file
+# defines it as a global. The old `from snakemake.script import snakemake` only
+# worked because Snakemake 8's own preamble also set it as a module attribute;
+# Snakemake 9 dropped that, so the import raises ImportError there. Relying on
+# the injected global works on both. Hence the noqa: F821 on its first uses --
+# a linter cannot see the preamble.
 
-os.environ["POLARS_MAX_THREADS"] = str(snakemake.threads)
+os.environ["POLARS_MAX_THREADS"] = str(snakemake.threads)  # noqa: F821
 import polars as pl  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
