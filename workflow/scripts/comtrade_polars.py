@@ -200,13 +200,18 @@ def _relabel(data: pl.DataFrame, members: pl.DataFrame, side: str
         # Join on the code, then keep the match only if the year falls inside
         # the membership window: a country that joined in 2004 is not an EU row
         # in 2003, and the United Kingdom is not one in 2021.
-        data.join(members, left_on=f"{side}Code", right_on="code", how="left")
+        #
+        # The cast is not cosmetic: Comtrade delivers the code columns as i64,
+        # while the membership codes are strings, and polars refuses a join
+        # across the two. Caught on the first real run (2026-10-25).
+        data.with_columns(pl.col(f"{side}Code").cast(pl.String).alias("_code"))
+        .join(members, left_on="_code", right_on="code", how="left")
         .with_columns(
             (pl.col("from").is_not_null()
              & (pl.col("year") >= pl.col("from"))
              & (pl.col("year") <= pl.col("to"))).alias(flag)
         )
-        .drop("from", "to", "code", strict=False)
+        .drop("_code", "from", "to", "code", strict=False)
         .with_columns(
             pl.when(pl.col(flag)).then(pl.lit(EU_ISO))
             .otherwise(pl.col(f"{side}ISO")).alias(f"{side}ISO"),
@@ -315,7 +320,12 @@ def _demo() -> None:
     )
 
     def frame(rows: list[dict]) -> pl.DataFrame:
-        """One trade row per dict, with the columns the aggregation reads."""
+        """One trade row per dict, with the columns the aggregation reads.
+
+        Codes are INTEGERS here, as Comtrade actually delivers them (i64).
+        The first version of this fixture used strings, so the join against the
+        membership table passed the check and failed on the real file.
+        """
         base = {"typeCode": "C", "freqCode": "A", "flowCode": "X",
                 "classificationCode": "H5", "cmdCode": "4403",
                 "qtyUnitCode": 8, "altQtyUnitCode": None,
@@ -326,10 +336,10 @@ def _demo() -> None:
 
     # Two members declaring towards the same non-member: one EU row.
     out, report = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 100.0},
-        {"period": "2015", "reporterCode": "56", "reporterISO": "BEL",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 30.0},
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 100.0},
+        {"period": "2015", "reporterCode": 56, "reporterISO": "BEL",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 30.0},
     ]), members)
     assert out.height == 1, out
     assert out["reporterISO"][0] == EU_ISO
@@ -339,24 +349,24 @@ def _demo() -> None:
 
     # Intra-EU trade is deleted, not summed into the node.
     out, report = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "56", "partnerISO": "BEL", "primaryValue": 50.0},
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 100.0},
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 56, "partnerISO": "BEL", "primaryValue": 50.0},
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 100.0},
     ]), members)
     assert report["intra_eu_dropped"] == 1, report
     assert out.height == 1 and out["primaryValue"][0] == 100.0, out
 
     # Dated membership, in both directions.
     out, _ = aggregate_eu(frame([
-        {"period": "2019", "reporterCode": "826", "reporterISO": "GBR",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 1.0},
-        {"period": "2021", "reporterCode": "826", "reporterISO": "GBR",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 2.0},
-        {"period": "2012", "reporterCode": "191", "reporterISO": "HRV",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 3.0},
-        {"period": "2013", "reporterCode": "191", "reporterISO": "HRV",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 4.0},
+        {"period": "2019", "reporterCode": 826, "reporterISO": "GBR",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 1.0},
+        {"period": "2021", "reporterCode": 826, "reporterISO": "GBR",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 2.0},
+        {"period": "2012", "reporterCode": 191, "reporterISO": "HRV",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 3.0},
+        {"period": "2013", "reporterCode": 191, "reporterISO": "HRV",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 4.0},
     ]), members)
     got = {(r["period"], r["reporterISO"]) for r in out.to_dicts()}
     assert ("2019", EU_ISO) in got, "GBR was an EU member in 2019"
@@ -364,22 +374,33 @@ def _demo() -> None:
     assert ("2012", "HRV") in got, "HRV joined in 2013, not before"
     assert ("2013", EU_ISO) in got, "HRV was a member in 2013"
 
+    # REGRESSION, found on the first real EU run (2026-10-25): Comtrade
+    # delivers the code columns as i64 while the membership codes are strings,
+    # and polars refuses to join across the two. Both dtypes must work, since
+    # a fixture written in strings is what hid the bug in the first place.
+    for code in (276, "276"):
+        out, _ = aggregate_eu(frame([
+            {"period": "2015", "reporterCode": code, "reporterISO": "DEU",
+             "partnerCode": 842, "partnerISO": "USA", "primaryValue": 1.0},
+        ]), members)
+        assert out["reporterISO"][0] == EU_ISO, f"{type(code).__name__} code failed"
+
     # The historical code of a member is folded in too: without code 58,
     # Belgium 1996-1998 would stay outside the EU node.
     out, _ = aggregate_eu(frame([
-        {"period": "1996", "reporterCode": "58", "reporterISO": "BEL",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 7.0},
+        {"period": "1996", "reporterCode": 58, "reporterISO": "BEL",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 7.0},
     ]), members)
     assert out["reporterISO"][0] == EU_ISO, out
 
     # Nulls stay null: an all-null group must not become a reporter declaring
     # zero. This is the rule inherited from trade_network_analysis.
     out, _ = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 10.0,
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 10.0,
          "netWgt": None},
-        {"period": "2015", "reporterCode": "56", "reporterISO": "BEL",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 20.0,
+        {"period": "2015", "reporterCode": 56, "reporterISO": "BEL",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 20.0,
          "netWgt": None},
     ]), members)
     assert out["netWgt"][0] is None, "an all-null group became a value"
@@ -387,35 +408,35 @@ def _demo() -> None:
 
     # ... but a partially declared group is summed over what is there.
     out, _ = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "842", "partnerISO": "USA", "netWgt": 5.0},
-        {"period": "2015", "reporterCode": "56", "reporterISO": "BEL",
-         "partnerCode": "842", "partnerISO": "USA", "netWgt": None},
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 842, "partnerISO": "USA", "netWgt": 5.0},
+        {"period": "2015", "reporterCode": 56, "reporterISO": "BEL",
+         "partnerCode": 842, "partnerISO": "USA", "netWgt": None},
     ]), members)
     assert out["netWgt"][0] == 5.0, out["netWgt"][0]
 
     # Quantities in different units are NOT added up: the unit is a key.
     out, _ = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "842", "partnerISO": "USA", "qtyUnitCode": 8,
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 842, "partnerISO": "USA", "qtyUnitCode": 8,
          "primaryValue": 1.0},
-        {"period": "2015", "reporterCode": "56", "reporterISO": "BEL",
-         "partnerCode": "842", "partnerISO": "USA", "qtyUnitCode": 12,
+        {"period": "2015", "reporterCode": 56, "reporterISO": "BEL",
+         "partnerCode": 842, "partnerISO": "USA", "qtyUnitCode": 12,
          "primaryValue": 2.0},
     ]), members)
     assert out.height == 2, "quantities in two units were merged"
 
     # A non-member is left strictly alone.
     out, _ = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "842", "reporterISO": "USA",
-         "partnerCode": "392", "partnerISO": "JPN", "primaryValue": 9.0},
+        {"period": "2015", "reporterCode": 842, "reporterISO": "USA",
+         "partnerCode": 392, "partnerISO": "JPN", "primaryValue": 9.0},
     ]), members)
     assert out["reporterISO"][0] == "USA" and out["partnerISO"][0] == "JPN"
 
     # The per-declaration columns are dropped, and said so.
     _, report = aggregate_eu(frame([
-        {"period": "2015", "reporterCode": "276", "reporterISO": "DEU",
-         "partnerCode": "842", "partnerISO": "USA", "primaryValue": 1.0},
+        {"period": "2015", "reporterCode": 276, "reporterISO": "DEU",
+         "partnerCode": 842, "partnerISO": "USA", "primaryValue": 1.0},
     ]), members)
     assert "isReported" in report["columns_dropped"], report["columns_dropped"]
     assert "reporterCode" in report["columns_dropped"]

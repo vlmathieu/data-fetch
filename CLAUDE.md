@@ -10,12 +10,15 @@ it says what the repo does and why. This file says how to work in it.
 | `comtrade_preflight` | **verified end to end** against the real API |
 | `comtrade_download` | **verified end to end** on 2026-10-25, free key, 1 call |
 | `comtrade_mirror` | **verified end to end** on the same run |
-| `comtrade_eu` | **never run**: needs `aggregate_eu: true`, only self-checked |
+| `comtrade_eu` | **verified end to end** on 2026-10-25, 0 API calls |
 
-The first real download happened on 2026-10-25: 2000-2003, code 4403, M+X, all
-reporters. It found a bug the self-checks could not (see `partner2Code` in the
-gotchas). **`comtrade_eu` has still never run**: say that it has not, rather
-than that it works.
+All four rules have now run against real data. The first download, on
+2026-10-25 (2000-2003, code 4403, M+X, all reporters), found **two** bugs the
+self-checks could not — see `partner2Code` and the dtype trap in the gotchas.
+Both had the same root cause: **a fixture written by hand does not have the
+schema of a real API response**, so a green self-check proved nothing. When
+adding a check over downloaded data, build the fixture from a real response, or
+at least copy its dtypes.
 
 ## Commands
 
@@ -161,6 +164,11 @@ All found by running things, not by rereading them.
   deliberately **not** `partner2Code`. Do not "complete" that tuple.
   The lesson is more general: a code is not an aggregate just because it
   appears in the areas table.
+- **Comtrade delivers the code columns as `i64`**, while the membership codes
+  and the areas table are strings. polars refuses a join across the two, so
+  every comparison against those tables casts: `pl.col("reporterCode").cast(pl.String)`.
+  The EU aggregation crashed on exactly this on its first real run, because the
+  fixture used string codes.
 - **`490` is Taiwan** and `exclude_pseudo` keeps it. UNSD cannot name it, so
   publishes it as "Other Asia, nes". A single reporting economy, not a sum of
   countries. Do not fold it into the aggregates because its label looks like
@@ -260,6 +268,14 @@ First real download, 2026-10-25, free key, hash 947dc53d:
   delivered: 175 reporters, 223 partners, 47 columns, Taiwan (490) present
   mirror: 10,996 directed edges, 4,634 (42%) declared on both sides,
           3,984 with no exporter declaration, 2,378 with no importer one
+  aggregate_eu on the same parquet, 0 API calls (stem unchanged, as designed):
+    15,630 -> 10,671 rows, 1,128 intra-EU deleted, 2,033 touching the EU node
+    22 per-declaration columns dropped
+    dated membership holds: the EU-15 are all folded in, and the ten 2004
+      entrants (POL, CZE, HUN...) still appear individually on 2000-2003
+    value conserved EXACTLY: raw 67,175,423,427 - intra-EU-15 6,946,311,657
+      = 60,229,111,770, which is what the EU file sums to. Gap 0.00
+    the 93 netWgt zeros come from the source, not from the sums
 ```
 
 Orders of magnitude, all reporters, M+X:
