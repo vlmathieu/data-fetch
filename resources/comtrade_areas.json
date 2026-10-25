@@ -1,0 +1,2830 @@
+{
+  "source": [
+    "https://comtradeapi.un.org/files/v1/app/reference/Reporters.json",
+    "https://comtradeapi.un.org/files/v1/app/reference/partnerAreas.json"
+  ],
+  "fetched_at": "2026-10-25T16:57:44+00:00",
+  "generated_by": "workflow/scripts/build_comtrade_areas.py",
+  "kinds": {
+    "country": "real country or territory with an ISO 3166-1 alpha-3 code",
+    "proxy": "single reporting economy published under a residual label",
+    "aggregate": "sum of several areas, or a catch-all; dropped by exclude_pseudo",
+    "territory": "real place with no ISO3; dropped by exclude_pseudo"
+  },
+  "counts_by_kind": {
+    "country": 276,
+    "proxy": 1,
+    "aggregate": 22,
+    "territory": 13
+  },
+  "areas": [
+    {
+      "code": 0,
+      "iso3": "W00",
+      "desc": "World",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "every partner summed; duplicates all bilateral flows"
+    },
+    {
+      "code": 4,
+      "iso3": "AFG",
+      "desc": "Afghanistan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 8,
+      "iso3": "ALB",
+      "desc": "Albania",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 10,
+      "iso3": "ATA",
+      "desc": "Antarctica",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 12,
+      "iso3": "DZA",
+      "desc": "Algeria",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 16,
+      "iso3": "ASM",
+      "desc": "American Samoa",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 20,
+      "iso3": "AND",
+      "desc": "Andorra",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 24,
+      "iso3": "AGO",
+      "desc": "Angola",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 28,
+      "iso3": "ATG",
+      "desc": "Antigua and Barbuda",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 31,
+      "iso3": "AZE",
+      "desc": "Azerbaijan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 32,
+      "iso3": "ARG",
+      "desc": "Argentina",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 36,
+      "iso3": "AUS",
+      "desc": "Australia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 40,
+      "iso3": "AUT",
+      "desc": "Austria",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 44,
+      "iso3": "BHS",
+      "desc": "Bahamas",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 48,
+      "iso3": "BHR",
+      "desc": "Bahrain",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 50,
+      "iso3": "BGD",
+      "desc": "Bangladesh",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 51,
+      "iso3": "ARM",
+      "desc": "Armenia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 52,
+      "iso3": "BRB",
+      "desc": "Barbados",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 56,
+      "iso3": "BEL",
+      "desc": "Belgium",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 58,
+      "iso3": "BEL",
+      "desc": "Belgium-Luxembourg (...1998)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 60,
+      "iso3": "BMU",
+      "desc": "Bermuda",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 64,
+      "iso3": "BTN",
+      "desc": "Bhutan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 68,
+      "iso3": "BOL",
+      "desc": "Bolivia (Plurinational State of)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 70,
+      "iso3": "BIH",
+      "desc": "Bosnia Herzegovina",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 72,
+      "iso3": "BWA",
+      "desc": "Botswana",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 74,
+      "iso3": "BVT",
+      "desc": "Bouvet Island",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 76,
+      "iso3": "BRA",
+      "desc": "Brazil",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 80,
+      "iso3": "ATB",
+      "desc": "Br. Antarctic Terr.",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 84,
+      "iso3": "BLZ",
+      "desc": "Belize",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 86,
+      "iso3": "IOT",
+      "desc": "Br. Indian Ocean Terr.",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 90,
+      "iso3": "SLB",
+      "desc": "Solomon Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 92,
+      "iso3": "VGB",
+      "desc": "Br. Virgin Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 96,
+      "iso3": "BRN",
+      "desc": "Brunei Darussalam",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 97,
+      "iso3": "EUR",
+      "desc": "European Union",
+      "is_reporter": true,
+      "is_partner": false,
+      "kind": "aggregate",
+      "note": "aggregate reporter, no partner code, reports from 2000"
+    },
+    {
+      "code": 100,
+      "iso3": "BGR",
+      "desc": "Bulgaria",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 104,
+      "iso3": "MMR",
+      "desc": "Myanmar",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 108,
+      "iso3": "BDI",
+      "desc": "Burundi",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 112,
+      "iso3": "BLR",
+      "desc": "Belarus",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 116,
+      "iso3": "KHM",
+      "desc": "Cambodia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 120,
+      "iso3": "CMR",
+      "desc": "Cameroon",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 124,
+      "iso3": "CAN",
+      "desc": "Canada",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 129,
+      "iso3": "A49",
+      "desc": "Caribbean, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Caribbean not elsewhere specified"
+    },
+    {
+      "code": 132,
+      "iso3": "CPV",
+      "desc": "Cabo Verde",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 136,
+      "iso3": "CYM",
+      "desc": "Cayman Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 140,
+      "iso3": "CAF",
+      "desc": "Central African Rep.",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 144,
+      "iso3": "LKA",
+      "desc": "Sri Lanka",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 148,
+      "iso3": "TCD",
+      "desc": "Chad",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 152,
+      "iso3": "CHL",
+      "desc": "Chile",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 156,
+      "iso3": "CHN",
+      "desc": "China",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 158,
+      "iso3": "TWN",
+      "desc": "Taiwan, Province of China",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 162,
+      "iso3": "CXR",
+      "desc": "Christmas Isds",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 166,
+      "iso3": "CCK",
+      "desc": "Cocos Isds",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 170,
+      "iso3": "COL",
+      "desc": "Colombia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 174,
+      "iso3": "COM",
+      "desc": "Comoros",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 175,
+      "iso3": "MYT",
+      "desc": "Mayotte (Overseas France)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 178,
+      "iso3": "COG",
+      "desc": "Congo",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 180,
+      "iso3": "COD",
+      "desc": "Dem. Rep. of the Congo",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 184,
+      "iso3": "COK",
+      "desc": "Cook Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 188,
+      "iso3": "CRI",
+      "desc": "Costa Rica",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 191,
+      "iso3": "HRV",
+      "desc": "Croatia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 192,
+      "iso3": "CUB",
+      "desc": "Cuba",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 196,
+      "iso3": "CYP",
+      "desc": "Cyprus",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 200,
+      "iso3": "CSK",
+      "desc": "Czechoslovakia (...1992)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 203,
+      "iso3": "CZE",
+      "desc": "Czechia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 204,
+      "iso3": "BEN",
+      "desc": "Benin",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 208,
+      "iso3": "DNK",
+      "desc": "Denmark",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 212,
+      "iso3": "DMA",
+      "desc": "Dominica",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 214,
+      "iso3": "DOM",
+      "desc": "Dominican Rep.",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 218,
+      "iso3": "ECU",
+      "desc": "Ecuador",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 221,
+      "iso3": "E29",
+      "desc": "Eastern Europe, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Eastern Europe not elsewhere specified"
+    },
+    {
+      "code": 222,
+      "iso3": "SLV",
+      "desc": "El Salvador",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 226,
+      "iso3": "GNQ",
+      "desc": "Equatorial Guinea",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 230,
+      "iso3": "ETH",
+      "desc": "Ethiopia (...1992)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 231,
+      "iso3": "ETH",
+      "desc": "Ethiopia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 232,
+      "iso3": "ERI",
+      "desc": "Eritrea",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 233,
+      "iso3": "EST",
+      "desc": "Estonia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 234,
+      "iso3": "FRO",
+      "desc": "Faroe Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 238,
+      "iso3": "FLK",
+      "desc": "Falkland Isds (Malvinas)",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 239,
+      "iso3": "SGS",
+      "desc": "South Georgia and the South Sandwich Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 242,
+      "iso3": "FJI",
+      "desc": "Fiji",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 246,
+      "iso3": "FIN",
+      "desc": "Finland",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 248,
+      "iso3": "ALA",
+      "desc": "Åland Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 250,
+      "iso3": "FRA",
+      "desc": "Metropolitan France",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 251,
+      "iso3": "FRA",
+      "desc": "France",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 254,
+      "iso3": "GUF",
+      "desc": "French Guiana (Overseas France)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 258,
+      "iso3": "PYF",
+      "desc": "French Polynesia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 260,
+      "iso3": "ATF",
+      "desc": "Fr. South Antarctic Terr.",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 262,
+      "iso3": "DJI",
+      "desc": "Djibouti",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 266,
+      "iso3": "GAB",
+      "desc": "Gabon",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 268,
+      "iso3": "GEO",
+      "desc": "Georgia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 270,
+      "iso3": "GMB",
+      "desc": "Gambia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 275,
+      "iso3": "PSE",
+      "desc": "State of Palestine",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 276,
+      "iso3": "DEU",
+      "desc": "Germany",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 278,
+      "iso3": "DDR",
+      "desc": "Dem. Rep. of Germany (...1990)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 280,
+      "iso3": "DEU",
+      "desc": "Fed. Rep. of Germany (...1990)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 288,
+      "iso3": "GHA",
+      "desc": "Ghana",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 290,
+      "iso3": "F49",
+      "desc": "Northern Africa, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Northern Africa not elsewhere specified"
+    },
+    {
+      "code": 292,
+      "iso3": "GIB",
+      "desc": "Gibraltar",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 296,
+      "iso3": "KIR",
+      "desc": "Kiribati",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 300,
+      "iso3": "GRC",
+      "desc": "Greece",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 304,
+      "iso3": "GRL",
+      "desc": "Greenland",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 308,
+      "iso3": "GRD",
+      "desc": "Grenada",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 312,
+      "iso3": "GLP",
+      "desc": "Guadeloupe (Overseas France)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 316,
+      "iso3": "GUM",
+      "desc": "Guam",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 320,
+      "iso3": "GTM",
+      "desc": "Guatemala",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 324,
+      "iso3": "GIN",
+      "desc": "Guinea",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 328,
+      "iso3": "GUY",
+      "desc": "Guyana",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 332,
+      "iso3": "HTI",
+      "desc": "Haiti",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 334,
+      "iso3": "HMD",
+      "desc": "Heard Island and McDonald Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 336,
+      "iso3": "VAT",
+      "desc": "Holy See (Vatican City State)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 340,
+      "iso3": "HND",
+      "desc": "Honduras",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 344,
+      "iso3": "HKG",
+      "desc": "China, Hong Kong SAR",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 348,
+      "iso3": "HUN",
+      "desc": "Hungary",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 352,
+      "iso3": "ISL",
+      "desc": "Iceland",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 356,
+      "iso3": "IND",
+      "desc": "India (...1974)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 360,
+      "iso3": "IDN",
+      "desc": "Indonesia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 364,
+      "iso3": "IRN",
+      "desc": "Iran",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 368,
+      "iso3": "IRQ",
+      "desc": "Iraq",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 372,
+      "iso3": "IRL",
+      "desc": "Ireland",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 376,
+      "iso3": "ISR",
+      "desc": "Israel",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 380,
+      "iso3": "ITA",
+      "desc": "Italy",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 384,
+      "iso3": "CIV",
+      "desc": "Côte d'Ivoire",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 388,
+      "iso3": "JAM",
+      "desc": "Jamaica",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 392,
+      "iso3": "JPN",
+      "desc": "Japan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 398,
+      "iso3": "KAZ",
+      "desc": "Kazakhstan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 400,
+      "iso3": "JOR",
+      "desc": "Jordan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 404,
+      "iso3": "KEN",
+      "desc": "Kenya",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 408,
+      "iso3": "PRK",
+      "desc": "Dem. People's Rep. of Korea",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 410,
+      "iso3": "KOR",
+      "desc": "Rep. of Korea",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 412,
+      "iso3": "_KS",
+      "desc": "Kosovo",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "real reporter, no ISO3 assigned by UNSD"
+    },
+    {
+      "code": 414,
+      "iso3": "KWT",
+      "desc": "Kuwait",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 417,
+      "iso3": "KGZ",
+      "desc": "Kyrgyzstan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 418,
+      "iso3": "LAO",
+      "desc": "Lao People's Dem. Rep.",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 422,
+      "iso3": "LBN",
+      "desc": "Lebanon",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 426,
+      "iso3": "LSO",
+      "desc": "Lesotho",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 428,
+      "iso3": "LVA",
+      "desc": "Latvia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 430,
+      "iso3": "LBR",
+      "desc": "Liberia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 434,
+      "iso3": "LBY",
+      "desc": "Libya",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 438,
+      "iso3": "LIE",
+      "desc": "Liechtenstein",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 440,
+      "iso3": "LTU",
+      "desc": "Lithuania",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 442,
+      "iso3": "LUX",
+      "desc": "Luxembourg",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 446,
+      "iso3": "MAC",
+      "desc": "China, Macao SAR",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 450,
+      "iso3": "MDG",
+      "desc": "Madagascar",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 454,
+      "iso3": "MWI",
+      "desc": "Malawi",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 457,
+      "iso3": "_SK",
+      "desc": "Sarawak",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "real place, no ISO3"
+    },
+    {
+      "code": 458,
+      "iso3": "MYS",
+      "desc": "Malaysia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 459,
+      "iso3": "_PM",
+      "desc": "Peninsula Malaysia (...1963)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, merged into Malaysia in 1963"
+    },
+    {
+      "code": 461,
+      "iso3": "_SH",
+      "desc": "Sabah (...1963)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, merged into Malaysia in 1963"
+    },
+    {
+      "code": 462,
+      "iso3": "MDV",
+      "desc": "Maldives",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 466,
+      "iso3": "MLI",
+      "desc": "Mali",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 470,
+      "iso3": "MLT",
+      "desc": "Malta",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 471,
+      "iso3": "R91",
+      "desc": "CACM, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Central American Common Market, nes"
+    },
+    {
+      "code": 472,
+      "iso3": "_AC",
+      "desc": "Africa CAMEU region, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Africa CAMEU region, nes"
+    },
+    {
+      "code": 473,
+      "iso3": "A79",
+      "desc": "LAIA, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Latin American Integration Association, nes"
+    },
+    {
+      "code": 474,
+      "iso3": "MTQ",
+      "desc": "Martinique (Overseas France)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 478,
+      "iso3": "MRT",
+      "desc": "Mauritania",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 480,
+      "iso3": "MUS",
+      "desc": "Mauritius",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 484,
+      "iso3": "MEX",
+      "desc": "Mexico",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 488,
+      "iso3": "_MI",
+      "desc": "Midway Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "real place, no ISO3"
+    },
+    {
+      "code": 490,
+      "iso3": "S19",
+      "desc": "Other Asia, nes",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "proxy",
+      "note": "TAIWAN. UNSD cannot name it, so publishes it under this residual label. A single reporting economy, not a sum of countries: dropping it would delete Taiwan's trade"
+    },
+    {
+      "code": 492,
+      "iso3": "MCO",
+      "desc": "Europe EU, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual despite carrying Monaco's ISO3 (MCO); UNSD note reads 'Europe EU, not elsewhere specified'"
+    },
+    {
+      "code": 496,
+      "iso3": "MNG",
+      "desc": "Mongolia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 498,
+      "iso3": "MDA",
+      "desc": "Rep. of Moldova",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 499,
+      "iso3": "MNE",
+      "desc": "Montenegro",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 500,
+      "iso3": "MSR",
+      "desc": "Montserrat",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 504,
+      "iso3": "MAR",
+      "desc": "Morocco",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 508,
+      "iso3": "MOZ",
+      "desc": "Mozambique",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 512,
+      "iso3": "OMN",
+      "desc": "Oman",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 516,
+      "iso3": "NAM",
+      "desc": "Namibia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 520,
+      "iso3": "NRU",
+      "desc": "Naoero",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 524,
+      "iso3": "NPL",
+      "desc": "Nepal",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 527,
+      "iso3": "O19",
+      "desc": "Oceania, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Oceania not elsewhere specified"
+    },
+    {
+      "code": 528,
+      "iso3": "NLD",
+      "desc": "Netherlands",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 530,
+      "iso3": "ANT",
+      "desc": "Netherlands Antilles (...2010)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 531,
+      "iso3": "CUW",
+      "desc": "Curaçao",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 532,
+      "iso3": "ANT",
+      "desc": "Netherlands Antilles and Aruba (...1985)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 533,
+      "iso3": "ABW",
+      "desc": "Aruba",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 534,
+      "iso3": "SXM",
+      "desc": "Saint Maarten",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 535,
+      "iso3": "BES",
+      "desc": "Bonaire",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 536,
+      "iso3": "NTZ",
+      "desc": "Neutral Zone",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "Saudi-Iraq neutral zone, dissolved 1991; NTZ is not an ISO 3166 code"
+    },
+    {
+      "code": 540,
+      "iso3": "NCL",
+      "desc": "New Caledonia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 548,
+      "iso3": "VUT",
+      "desc": "Vanuatu",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 554,
+      "iso3": "NZL",
+      "desc": "New Zealand",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 558,
+      "iso3": "NIC",
+      "desc": "Nicaragua",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 562,
+      "iso3": "NER",
+      "desc": "Niger",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 566,
+      "iso3": "NGA",
+      "desc": "Nigeria",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 568,
+      "iso3": "E19",
+      "desc": "Other Europe, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: other Europe not elsewhere specified"
+    },
+    {
+      "code": 570,
+      "iso3": "NIU",
+      "desc": "Niue",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 574,
+      "iso3": "NFK",
+      "desc": "Norfolk Isds",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 577,
+      "iso3": "F19",
+      "desc": "Other Africa, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: other Africa not elsewhere specified"
+    },
+    {
+      "code": 578,
+      "iso3": "NOR",
+      "desc": "Norway, excluding Svalbard and Jan Mayen",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 579,
+      "iso3": "NOR",
+      "desc": "Norway",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 580,
+      "iso3": "MNP",
+      "desc": "N. Mariana Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 581,
+      "iso3": "UMI",
+      "desc": "United States Minor Outlying Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 582,
+      "iso3": "PCI",
+      "desc": "Pacific Isds (...1991)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 583,
+      "iso3": "FSM",
+      "desc": "FS Micronesia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 584,
+      "iso3": "MHL",
+      "desc": "Marshall Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 585,
+      "iso3": "PLW",
+      "desc": "Palau",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 586,
+      "iso3": "PAK",
+      "desc": "Pakistan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 588,
+      "iso3": "PAK",
+      "desc": "East and West Pakistan (...1971)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 590,
+      "iso3": "PAN",
+      "desc": "Panama, excl.Canal Zone (...1977)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 591,
+      "iso3": "PAN",
+      "desc": "Panama",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 592,
+      "iso3": "PCZ",
+      "desc": "Panama-Canal-Zone (...1977)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 598,
+      "iso3": "PNG",
+      "desc": "Papua New Guinea",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 600,
+      "iso3": "PRY",
+      "desc": "Paraguay",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 604,
+      "iso3": "PER",
+      "desc": "Peru",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 608,
+      "iso3": "PHL",
+      "desc": "Philippines",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 612,
+      "iso3": "PCN",
+      "desc": "Pitcairn",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 616,
+      "iso3": "POL",
+      "desc": "Poland",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 620,
+      "iso3": "PRT",
+      "desc": "Portugal",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 624,
+      "iso3": "GNB",
+      "desc": "Guinea-Bissau",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 626,
+      "iso3": "TLS",
+      "desc": "Timor-Leste",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 630,
+      "iso3": "PRI",
+      "desc": "Puerto Rico",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 634,
+      "iso3": "QAT",
+      "desc": "Qatar",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 636,
+      "iso3": "A79",
+      "desc": "Rest of America, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: rest of America not elsewhere specified"
+    },
+    {
+      "code": 637,
+      "iso3": "A59",
+      "desc": "North America and Central America, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: North and Central America, nes"
+    },
+    {
+      "code": 638,
+      "iso3": "REU",
+      "desc": "Réunion (Overseas France)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 642,
+      "iso3": "ROU",
+      "desc": "Romania",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 643,
+      "iso3": "RUS",
+      "desc": "Russian Federation",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 646,
+      "iso3": "RWA",
+      "desc": "Rwanda",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 647,
+      "iso3": "_RI",
+      "desc": "Ryukyu Isd",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, returned to Japan in 1972"
+    },
+    {
+      "code": 652,
+      "iso3": "BLM",
+      "desc": "Saint Barthélemy",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 654,
+      "iso3": "SHN",
+      "desc": "Saint Helena",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 658,
+      "iso3": "KNA",
+      "desc": "Saint Kitts, Nevis and Anguilla (...1980)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 659,
+      "iso3": "KNA",
+      "desc": "Saint Kitts and Nevis",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 660,
+      "iso3": "AIA",
+      "desc": "Anguilla",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 662,
+      "iso3": "LCA",
+      "desc": "Saint Lucia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 663,
+      "iso3": "MAF",
+      "desc": "Saint Martin (French part)",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 666,
+      "iso3": "SPM",
+      "desc": "Saint Pierre and Miquelon",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 670,
+      "iso3": "VCT",
+      "desc": "Saint Vincent and the Grenadines",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 674,
+      "iso3": "SMR",
+      "desc": "San Marino",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 678,
+      "iso3": "STP",
+      "desc": "Sao Tome and Principe",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 682,
+      "iso3": "SAU",
+      "desc": "Saudi Arabia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 686,
+      "iso3": "SEN",
+      "desc": "Senegal",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 688,
+      "iso3": "SRB",
+      "desc": "Serbia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 690,
+      "iso3": "SYC",
+      "desc": "Seychelles",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 694,
+      "iso3": "SLE",
+      "desc": "Sierra Leone",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 697,
+      "iso3": "R20",
+      "desc": "Europe EFTA, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: EFTA not elsewhere specified"
+    },
+    {
+      "code": 698,
+      "iso3": "_SM",
+      "desc": "Sikkim, Protectorate of India (...1974)",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, merged into India in 1975"
+    },
+    {
+      "code": 699,
+      "iso3": "IND",
+      "desc": "India",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 702,
+      "iso3": "SGP",
+      "desc": "Singapore",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 703,
+      "iso3": "SVK",
+      "desc": "Slovakia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 704,
+      "iso3": "VNM",
+      "desc": "Viet Nam",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 705,
+      "iso3": "SVN",
+      "desc": "Slovenia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 706,
+      "iso3": "SOM",
+      "desc": "Somalia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 710,
+      "iso3": "ZAF",
+      "desc": "South Africa",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 711,
+      "iso3": "ZA1",
+      "desc": "Southern African Customs Union (...1999)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "customs union aggregate, closed 1999"
+    },
+    {
+      "code": 716,
+      "iso3": "ZWE",
+      "desc": "Zimbabwe",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 717,
+      "iso3": "_RN",
+      "desc": "Rhodesia Nyas (...1964)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, dissolved 1964"
+    },
+    {
+      "code": 720,
+      "iso3": "YMD",
+      "desc": "Dem. Yemen (...1990)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 724,
+      "iso3": "ESP",
+      "desc": "Spain",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 728,
+      "iso3": "SSD",
+      "desc": "South Sudan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 729,
+      "iso3": "SDN",
+      "desc": "Sudan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 732,
+      "iso3": "ESH",
+      "desc": "Western Sahara",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 736,
+      "iso3": "SDN",
+      "desc": "Sudan (...2011)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 740,
+      "iso3": "SUR",
+      "desc": "Suriname",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 744,
+      "iso3": "SJM",
+      "desc": "Svalbard and Jan Mayen Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 748,
+      "iso3": "SWZ",
+      "desc": "Eswatini",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 752,
+      "iso3": "SWE",
+      "desc": "Sweden",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 756,
+      "iso3": "CHE",
+      "desc": "Switzerland",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 757,
+      "iso3": "CHE",
+      "desc": "Switzerland",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 760,
+      "iso3": "SYR",
+      "desc": "Syria",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 762,
+      "iso3": "TJK",
+      "desc": "Tajikistan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 764,
+      "iso3": "THA",
+      "desc": "Thailand",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 768,
+      "iso3": "TGO",
+      "desc": "Togo",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 772,
+      "iso3": "TKL",
+      "desc": "Tokelau",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 776,
+      "iso3": "TON",
+      "desc": "Tonga",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 780,
+      "iso3": "TTO",
+      "desc": "Trinidad and Tobago",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 784,
+      "iso3": "ARE",
+      "desc": "United Arab Emirates",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 788,
+      "iso3": "TUN",
+      "desc": "Tunisia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 792,
+      "iso3": "TUR",
+      "desc": "Türkiye",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 795,
+      "iso3": "TKM",
+      "desc": "Turkmenistan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 796,
+      "iso3": "TCA",
+      "desc": "Turks and Caicos Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 798,
+      "iso3": "TUV",
+      "desc": "Tuvalu",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 800,
+      "iso3": "UGA",
+      "desc": "Uganda",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 804,
+      "iso3": "UKR",
+      "desc": "Ukraine",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 807,
+      "iso3": "MKD",
+      "desc": "North Macedonia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 810,
+      "iso3": "SUN",
+      "desc": "USSR (...1990)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 818,
+      "iso3": "EGY",
+      "desc": "Egypt",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 826,
+      "iso3": "GBR",
+      "desc": "United Kingdom",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 830,
+      "iso3": "_CI",
+      "desc": "Channel Islands",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "real place, no ISO3"
+    },
+    {
+      "code": 831,
+      "iso3": "GGY",
+      "desc": "Guernsey",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 832,
+      "iso3": "JEY",
+      "desc": "Jersey",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 833,
+      "iso3": "IMN",
+      "desc": "Isle of Man",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 834,
+      "iso3": "TZA",
+      "desc": "United Rep. of Tanzania",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 835,
+      "iso3": "_TK",
+      "desc": "Tanganyika (...1964)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, became Tanzania in 1964"
+    },
+    {
+      "code": 836,
+      "iso3": "_ZP",
+      "desc": "Zanzibar and Pemba Isd (...1964)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "historical, became Tanzania in 1964"
+    },
+    {
+      "code": 837,
+      "iso3": "X1",
+      "desc": "Bunkers",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "fuel and stores supplied to ships and aircraft, not a destination"
+    },
+    {
+      "code": 838,
+      "iso3": "X2",
+      "desc": "Free Zones",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "free zones, not a destination"
+    },
+    {
+      "code": 839,
+      "iso3": "XX",
+      "desc": "Special Categories",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "special categories, not a destination"
+    },
+    {
+      "code": 840,
+      "iso3": "USA",
+      "desc": "United States of America",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 841,
+      "iso3": "USA",
+      "desc": "USA and Puerto Rico (...1980)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 842,
+      "iso3": "USA",
+      "desc": "USA",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 849,
+      "iso3": "PUS",
+      "desc": "US Misc. Pacific Isds",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 850,
+      "iso3": "VIR",
+      "desc": "US Virgin Isds (...1980)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 854,
+      "iso3": "BFA",
+      "desc": "Burkina Faso",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 858,
+      "iso3": "URY",
+      "desc": "Uruguay",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 860,
+      "iso3": "UZB",
+      "desc": "Uzbekistan",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 862,
+      "iso3": "VEN",
+      "desc": "Venezuela",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 866,
+      "iso3": "VDR",
+      "desc": "Dem. Rep. of Vietnam (...1974)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 868,
+      "iso3": "VNM",
+      "desc": "Rep. of Vietnam (...1974)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 872,
+      "iso3": "_WI",
+      "desc": "Wake Island",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "territory",
+      "note": "real place, no ISO3"
+    },
+    {
+      "code": 876,
+      "iso3": "WLF",
+      "desc": "Wallis and Futuna Isds",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 879,
+      "iso3": "F97",
+      "desc": "Western Asia, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "residual: Western Asia not elsewhere specified"
+    },
+    {
+      "code": 882,
+      "iso3": "WSM",
+      "desc": "Samoa",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 886,
+      "iso3": "YEM",
+      "desc": "Arab Rep. of Yemen (...1990)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 887,
+      "iso3": "YEM",
+      "desc": "Yemen",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 890,
+      "iso3": "YUG",
+      "desc": "Yugoslavia (...1991)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 891,
+      "iso3": "SCG",
+      "desc": "Serbia and Montenegro (...2005)",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 894,
+      "iso3": "ZMB",
+      "desc": "Zambia",
+      "is_reporter": true,
+      "is_partner": true,
+      "kind": "country",
+      "note": ""
+    },
+    {
+      "code": 899,
+      "iso3": "_X",
+      "desc": "Areas, nes",
+      "is_reporter": false,
+      "is_partner": true,
+      "kind": "aggregate",
+      "note": "catch-all for unallocated areas"
+    },
+    {
+      "code": 975,
+      "iso3": "R4",
+      "desc": "ASEAN",
+      "is_reporter": true,
+      "is_partner": false,
+      "kind": "aggregate",
+      "note": "aggregate reporter, no partner code, reports from 2010"
+    }
+  ]
+}

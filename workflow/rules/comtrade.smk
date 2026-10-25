@@ -21,8 +21,7 @@ rule comtrade_preflight:
 rule comtrade_download:
     """Downloads according to the plan. The only rule that spends premium quota.
 
-    Reads comtrade_apikey from the environment, inside the script: never in
-    `params:`, which Snakemake records in cleartext in .snakemake/metadata/.
+    Reads comtrade_apikey from the environment, inside the script.
     """
     input:
         f'{OUT}/{STEM}.plan.json'
@@ -54,3 +53,26 @@ rule comtrade_mirror:
         '../envs/comtrade.yaml'
     script:
         '../scripts/mirror_flows.py'
+
+
+rule comtrade_eu:
+    """The EU as one node, summed from its member states. A DERIVED file.
+
+    Never Comtrade's code 97: that code exists only as a reporter and reports
+    nothing before 2000. The canonical parquet is left untouched, so the
+    aggregation can be redone without downloading anything again.
+    """
+    input:
+        f'{OUT}/{STEM}.parquet'
+    output:
+        [f'{OUT}/{STEM}.eu.{fmt}' for fmt in FORMATS]
+    params:
+        params = PARAMS,
+        csv_sep = CSV_SEP
+    log:
+        f'workflow/logs/comtrade_eu_{STEM}.log'
+    threads: 4
+    conda:
+        '../envs/comtrade.yaml'
+    script:
+        '../scripts/aggregate_eu.py'

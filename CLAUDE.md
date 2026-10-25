@@ -3,34 +3,38 @@
 Guidance for Claude Code in `data-fetch`. **Read [README.md](README.md) first**:
 it says what the repo does and why. This file says how to work in it.
 
-## Actual state (2026-10-24, commit cc3ead8)
+## Actual state (2026-10-25)
 
 | Rule | State |
 |---|---|
 | `comtrade_preflight` | **verified end to end** against the real API |
 | `comtrade_download` | **never run**, requires an API key |
 | `comtrade_mirror` | **never run**, depends on the output of `download` |
+| `comtrade_eu` | **never run**, same reason |
 
-Syntax validated and DAG valid for all three, but that is not the same as
+Syntax validated and DAG valid for all four, but that is not the same as
 running them. The first real download is the user's to make. **Never claim that
-`download` or `mirror` works**: say that they have not been run.
+`download`, `mirror` or `eu` works**: say that they have not been run. In
+particular, `exclude_pseudo` and the EU aggregation are verified only by their
+self-checks, never against a downloaded file.
 
 ## Commands
 
 ```zsh
-python workflow/scripts/comtrade_common.py        # the only runnable check
+python workflow/scripts/comtrade_common.py        # hash, packing, areas, refusals
+python workflow/scripts/comtrade_polars.py        # EU aggregation
+python workflow/scripts/build_comtrade_areas.py   # refresh resources/, public, no key
 snakemake preflight --sdm conda --cores 1         # free, no key
 snakemake --sdm conda --cores 1                   # full download (premium quota)
 snakemake -n                                      # dry run, no conda needed
 snakemake --sdm conda --cores 1 --config run_id=20261024T120000   # replays a run
 ```
 
-**No test suite.** Verification means running the rule, reading
+**No test suite.** The two `_demo()` functions under `__main__` are the check.
+Beyond them, verification means running the rule, reading
 `workflow/logs/<rule>_<stem>.log`, and inspecting `data/comtrade/`.
 
-`comtrade_common.py` has a `_demo()` under `__main__`: stable hash, packing,
-refusal of `TOTAL` and of `hs_revision: auto`. Any non-trivial logic added
-there leaves an `assert` behind.
+Any non-trivial logic added to either module leaves an `assert` behind.
 
 ## Architecture
 
@@ -41,13 +45,29 @@ Snakefile ──(import at DAG time)──> comtrade_common.resolve_params, para
          comtrade_preflight  → {STEM}.plan.json          PUBLIC endpoints, off quota
          comtrade_download   → {STEM}.{parquet,csv} + {STEM}.meta.json   keyed quota
          comtrade_mirror     → {STEM}.mirror.{parquet,csv}
+         comtrade_eu         → {STEM}.eu.{parquet,csv}   if aggregate_eu
+
+resources/                 versioned, NOT fetched at runtime
+  comtrade_areas.{json,csv}   312 areas: code, iso3, desc, kind  (generated)
+  eu_membership.csv           dated EU membership, keyed on ISO3  (by hand)
 ```
 
-`comtrade_common.py` is shared between the Snakefile and the scripts. It holds
-the ceilings (`caps()`, `FREE_RECORDS_PER_CALL`, `PREMIUM_RECORDS_PER_CALL`,
-`WARN_FRACTION`), the `FIXED` constants, parameter resolution
-and hashing, the `call()` wrapper, `selection()`, `pack_periods()` and
-`bisect_codes()`.
+**Two shared modules, and the split matters:**
+
+- `comtrade_common.py` is imported **by the Snakefile**, before any rule. It
+  must stay free of polars, pandas and network access. It holds the ceilings
+  (`caps()`, `FREE_RECORDS_PER_CALL`, `PREMIUM_RECORDS_PER_CALL`,
+  `WARN_FRACTION`), the `FIXED` constants, parameter resolution and hashing,
+  the `call()` wrapper, `selection()`, `pack_periods()`, `bisect_codes()`, and
+  the areas table (`_load_areas()`, `resolve_areas()`, `pseudo_codes()`, stdlib
+  `json` only).
+- `comtrade_polars.py` is imported **by the scripts only**, inside the conda
+  env, so polars is allowed. It holds `guarded_sum()` (shared with the mirror)
+  and the EU aggregation (`eu_membership()`, `aggregate_eu()`).
+
+`aggregate_eu.py` is only the Snakemake wiring: the logic lives in
+`comtrade_polars.py` because a `script:` file cannot be run on its own, and
+therefore cannot carry a self-check.
 
 ## Gotchas
 
@@ -65,7 +85,41 @@ All found by running things, not by rereading them.
   `typeCode` comes first. Forgetting it only raises at runtime.
 - **Output paths depend on `params_hash`, computed at DAG time.** Touching
   `resolve_params()` or `_NOT_IN_HASH` renames **every** future file and
-  detaches past runs from their request. That is not a free refactor.
+  detaches past runs from their request. That is not a free refactor. It was
+  done once, on 2026-10-25, when `exclude_pseudo` entered the hash:
+  `8dbfc6dd` → `ac3dd013` on the default config. It was nearly free then,
+  because the only artifact on disk was a plan.json a free preflight
+  regenerates. It will not be that cheap again.
+- **What goes in the hash is a line, not a habit.** A key enters it when it
+  changes the rows delivered (`exclude_pseudo`), and stays out when it only
+  adds a derived file next to the canonical one (`mirror`, `aggregate_eu`) or
+  describes transport (`format`, `csv_sep`, `records_per_call`, `run_id`).
+- **`reporter`/`partner` accept ISO3 or numeric codes**, resolved to codes
+  **before** hashing, so `[FRA]` and `['250','251']` share one stem. An ISO3
+  resolves to **every** matching code: 15 ISO3 cover several Comtrade areas
+  (historical splits), and they are disjoint in time, so sending all of them is
+  both safe and the only way to get an unbroken series (`BEL` needs code 58 for
+  1996-1998 and code 56 after). Measured, not assumed — and the download warns
+  if one ISO3 ever shows up under two codes in one period.
+- **`resources/comtrade_areas.json` is versioned on purpose.** `resolve_params`
+  runs at DAG time: a network call there would make `snakemake -n` fail on a
+  connection blip, and a fingerprint must not depend on a file UNSD can
+  rewrite. Refresh it by hand with `build_comtrade_areas.py`, which **refuses
+  to run** if UNSD added an area it cannot classify.
+- **`kind` in the areas table is a hand-reviewed list, not a rule.** Every
+  mechanical test fails both ways: "no valid ISO3" misses the European Union
+  (97/`EUR`), "Europe EU, nes" (492/`MCO`) and the Neutral Zone (536/`NTZ`),
+  and catches real places that merely lack an ISO3 (Kosovo, Channel Islands).
+  UNSD's own `isGroup` marks 4 areas out of 312. Do not "simplify" it to a
+  regex: the previous repo's `excluded_iso: ['XX','_X','\d']` missed the EU.
+- **`490` is Taiwan** and `exclude_pseudo` keeps it. UNSD cannot name it, so
+  publishes it as "Other Asia, nes". A single reporting economy, not a sum of
+  countries. Do not fold it into the aggregates because its label looks like
+  one.
+- **The preflight counts are pre-filter, deliberately.** The ceiling guards the
+  API *response*, which is unfiltered, so counting unfiltered is the
+  conservative choice. Consequence: `expected_rows_total` is an upper bound of
+  the sidecar's `rows`, and should be compared to `rows_received` instead.
 - **`comtrade_common.py` must stay cheap to import**: the Snakefile imports it
   before any rule. No polars, no comtradeapicall in there.
 - **The row ceiling is the key's, not the package's.** `records_per_call` in
@@ -129,6 +183,10 @@ pinned).
 
 To spot an abnormal run.
 
+All counts below are **pre-filter**: `exclude_pseudo` runs after the download,
+so it does not move any of these. Re-measured on 2026-10-25 with hash
+`ac3dd013`, identical to the figures taken under `8dbfc6dd`.
+
 ```
 Default config (1996-2023, codes 4403/4407/4412, M+X, all reporters):
   539,660 rows expected,  28 free counting calls
@@ -168,9 +226,12 @@ sidecar's `datasetChecksum` settles it.
   rows and produces a warning, nothing more.
 - **download checks**: the plan's per-period counts are never compared to the
   rows received, nor the total to `expected_rows_total`. Only the ceiling,
-  empty packs and absent periods are caught today. The availability
-  `totalRecords` is not a usable baseline (whole reporter-period, not our
-  codes); the preview counts are. See README for the full note.
+  empty packs and absent periods are caught today, plus the ISO3 double-count
+  warning added on 2026-10-25. The availability `totalRecords` is not a usable
+  baseline (whole reporter-period, not our codes); the preview counts are. See
+  README for the full note. **Compare against the sidecar's `rows_received`,
+  not `rows`**: the latter is post-`exclude_pseudo`, so it is legitimately
+  lower than the plan.
 - **compare with `comtradr`**: the R wrapper over the same API
   (https://docs.ropensci.org/comtradr/). Its docs state a maximum interval of
   twelve years per request. If that holds for `data/v1/get`, `pack_periods()`

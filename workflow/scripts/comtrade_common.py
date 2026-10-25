@@ -22,6 +22,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from functools import lru_cache
+from pathlib import Path
 
 # --- API caps ---------------------------------------------------------------
 # getFinalData's ceiling is set by the subscription tier, not by the package:
@@ -85,9 +87,154 @@ FREQUENCIES = frozenset({"A", "M"})
 
 # Keys that describe the delivery, not the request: excluded from the hash.
 # records_per_call is a transport ceiling, not part of the request: the same
-# selection pulled on a free and a premium key is the same data.
-_NOT_IN_HASH = frozenset({"format", "csv_sep", "mirror", "run_id", "out_dir",
-                          "records_per_call"})
+# selection pulled on a free and a premium key is the same data. mirror and
+# aggregate_eu add a DERIVED file next to the canonical one without touching
+# it, so they do not change the request either.
+#
+# exclude_pseudo is deliberately NOT here: it changes the rows delivered, so
+# two files sharing a stem would otherwise hold different data.
+_NOT_IN_HASH = frozenset({"format", "csv_sep", "mirror", "aggregate_eu",
+                          "run_id", "out_dir", "records_per_call"})
+
+
+# --- areas: Comtrade codes, ISO3, and what is not a country -----------------
+# resources/comtrade_areas.json is VERSIONED, not fetched: resolve_params runs
+# at DAG time, and a fingerprint must not depend on a remote file UNSD can
+# rewrite. Refresh it with workflow/scripts/build_comtrade_areas.py.
+AREAS_PATH = Path(__file__).resolve().parents[2] / "resources" / "comtrade_areas.json"
+
+# Kinds dropped by exclude_pseudo. 'country' and 'proxy' are kept: the single
+# proxy is 490 "Other Asia, nes", which is Taiwan, a reporting economy rather
+# than a sum of countries.
+PSEUDO_KINDS = frozenset({"aggregate", "territory"})
+
+
+@lru_cache(maxsize=1)
+def _load_areas() -> tuple[dict[str, dict], dict[str, tuple[str, ...]]]:
+    """Reads the areas table once, and indexes it both ways.
+
+    stdlib json only: this module is imported by the Snakefile before any rule,
+    so it must stay free of polars, pandas and network access.
+
+    Returns
+    -------
+    (by_code, by_iso3) : tuple of dict
+        by_code : {'251': {'code', 'iso3', 'desc', 'kind', ...}}, every area,
+            keyed by its numeric code as a string.
+        by_iso3 : {'FRA': ('251',), 'BEL': ('56', '58')}, countries and proxies
+            only, keyed by ISO3. A tuple because 15 ISO3 map to several codes.
+
+    Raises
+    ------
+    FileNotFoundError
+        The table is missing. Regenerate it with build_comtrade_areas.py.
+    """
+    try:
+        payload = json.loads(AREAS_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"{AREAS_PATH} is missing. Regenerate it with "
+            f"`python workflow/scripts/build_comtrade_areas.py` (public "
+            f"endpoints, no API key)."
+        ) from exc
+
+    by_code: dict[str, dict] = {}
+    by_iso3: dict[str, list[str]] = {}
+    for area in payload["areas"]:
+        code = str(area["code"])
+        by_code[code] = area
+        # Only selectable entities get an ISO3 entry: an aggregate must not be
+        # reachable by writing its ISO3, since exclude_pseudo drops it anyway.
+        if area["kind"] in {"country", "proxy"} and area["iso3"]:
+            by_iso3.setdefault(area["iso3"], []).append(code)
+    return by_code, {iso: tuple(sorted(codes)) for iso, codes in by_iso3.items()}
+
+
+def pseudo_codes() -> frozenset[str]:
+    """Numeric codes of everything that is not a country, as strings.
+
+    Used by comtrade_download to drop those rows. Keyed on codes rather than
+    ISO3, because the ISO columns are absent when include_desc is false.
+
+    Returns
+    -------
+    frozenset of str
+        The aggregate and territory codes: '0' (World), '97' (European Union),
+        '899' (Areas, nes), '837' (Bunkers)... Excludes '490' (Taiwan).
+    """
+    by_code, _ = _load_areas()
+    return frozenset(code for code, area in by_code.items()
+                     if area["kind"] in PSEUDO_KINDS)
+
+
+def resolve_areas(values, label: str) -> list[str] | None:
+    """Resolves a reporter/partner selection to canonical numeric codes.
+
+    Accepts three forms, so that a config can be read by a human:
+    'all', numeric codes ('251'), or ISO3 codes ('FRA', any case). Resolution
+    happens BEFORE hashing, so reporter [FRA] and reporter ['251'] are the same
+    request and share one fingerprint.
+
+    An ISO3 pointing at several codes resolves to ALL of them. Measured on the
+    reference tables: the codes of one ISO3 are disjoint in time (FRA -> 251
+    only, while 250 'Metropolitan France' carries no rows; BEL -> 58 for
+    1996-1998, then 56), so no row is counted twice, and it is the only way to
+    get an unbroken series across a historical split.
+
+    Parameters
+    ----------
+    values : None, str, int, or iterable
+        'all' or None for every area, otherwise codes and/or ISO3 mixed freely.
+    label : str
+        Name of the parameter being resolved ('reporter', 'partner'), used in
+        error messages.
+
+    Returns
+    -------
+    list of str, or None
+        Sorted, deduplicated numeric codes as strings. None means "every one",
+        which is how the API reads an absent parameter.
+
+    Raises
+    ------
+    ValueError
+        An unknown numeric code, an unknown ISO3, or a value that is neither.
+        Raised at DAG time, so a typo costs nothing: it never reaches the API,
+        where it would come back as a swallowed HTTP error.
+    """
+    if values is None or (isinstance(values, str)
+                          and values.strip().lower() == "all"):
+        return None
+    if isinstance(values, (str, int)):
+        values = [values]
+
+    by_code, by_iso3 = _load_areas()
+    codes: set[str] = set()
+    for raw in values:
+        item = str(raw).strip()
+        if item.isdigit():
+            code = str(int(item))                     # '0251' and '251' are one
+            if code not in by_code:
+                raise ValueError(
+                    f"{label}: unknown Comtrade code {item!r}. See "
+                    f"resources/comtrade_areas.csv."
+                )
+            codes.add(code)
+        elif len(item) == 3 and item.isalpha():
+            found = by_iso3.get(item.upper())
+            if not found:
+                raise ValueError(
+                    f"{label}: unknown ISO3 {item!r}, or it designates an "
+                    f"aggregate that cannot be selected. See "
+                    f"resources/comtrade_areas.csv."
+                )
+            codes.update(found)
+        else:
+            raise ValueError(
+                f"{label}: {item!r} is neither a numeric Comtrade code nor an "
+                f"ISO3 code. Use 'all', ['251'] or ['FRA']."
+            )
+    return sorted(codes, key=int)
 
 
 # --- parameter resolution ---------------------------------------------------
@@ -145,29 +292,6 @@ def _norm_list(value) -> list[str] | None:
         value = [value]                               # a lone code is a list of one
     out = sorted({str(v).strip() for v in value})     # set = dedup, sorted = canonical
     return out or None
-
-
-def _norm_selector(value) -> list[str] | None:
-    """Canonical list for a dimension where "everything" is allowed.
-
-    The API means "every one" by an absent parameter, so None is the internal
-    spelling of "all". Used for reporter, partner and partner2, never for cmd
-    (asking for every product is refused, see resolve_params).
-
-    Parameters
-    ----------
-    value : None, str, int, or iterable of str or int
-        Codes to keep, or the string 'all' (any case), or None.
-
-    Returns
-    -------
-    list of str, or None
-        None when every one is wanted ('all' or nothing given), otherwise the
-        canonical list from _norm_list.
-    """
-    if value is None or (isinstance(value, str) and value.strip().lower() == "all"):
-        return None
-    return _norm_list(value)
 
 
 def _periods(cfg: dict) -> list[str]:
@@ -233,16 +357,17 @@ def resolve_params(cfg: dict) -> dict:
     dict
         Resolved parameters, with every key present and canonical:
         data_type, freq, classification, period (list of str), cmd (list of
-        str), flow, reporter, partner, partner2 (list of str or None for
-        "all"), aggregate_by, include_desc (bool), hs_revision,
-        records_per_call (int). This dict is the single reference used by the
-        hash, the plan and the download.
+        str), flow, reporter, partner, partner2 (numeric codes as str, or None
+        for "all"), aggregate_by, include_desc (bool), hs_revision,
+        records_per_call (int), exclude_pseudo (bool). This dict is the single
+        reference used by the hash, the plan and the download.
 
     Raises
     ------
     ValueError
         cmd missing, cmd TOTAL, unknown data_type / classification / freq /
-        hs_revision, or records_per_call outside 1..PREMIUM_RECORDS_PER_CALL.
+        hs_revision, an unknown area code or ISO3 in reporter / partner /
+        partner2, or records_per_call outside 1..PREMIUM_RECORDS_PER_CALL.
     NotImplementedError
         hs_revision 'auto', which needs the correspondence tables of the
         `mapping` job.
@@ -265,14 +390,20 @@ def resolve_params(cfg: dict) -> dict:
         # Default M+X: imports and exports, the two sides the mirror needs.
         "flow":           _norm_list(_default(cfg.get("flow"), ["M", "X"])),
         # None = every one, which is how the API reads an absent parameter.
-        "reporter":       _norm_selector(_default(cfg.get("reporter"), "all")),
-        "partner":        _norm_selector(_default(cfg.get("partner"), "all")),
-        "partner2":       _norm_selector(cfg.get("partner2")),
+        # ISO3 or numeric codes, resolved to codes BEFORE hashing so that
+        # [FRA] and ['251'] are one request.
+        "reporter":       resolve_areas(_default(cfg.get("reporter"), "all"),
+                                        "reporter"),
+        "partner":        resolve_areas(_default(cfg.get("partner"), "all"),
+                                        "partner"),
+        "partner2":       resolve_areas(cfg.get("partner2"), "partner2"),
         "aggregate_by":   _default(cfg.get("aggregate_by"), None) or None,
         "include_desc":   bool(_default(cfg.get("include_desc"), True)),
         "hs_revision":    str(_default(cfg.get("hs_revision"), "strict")).lower(),
         "records_per_call": int(_default(cfg.get("records_per_call"),
                                          FREE_RECORDS_PER_CALL)),
+        # Changes the rows delivered, hence IN the hash (see _NOT_IN_HASH).
+        "exclude_pseudo": bool(_default(cfg.get("exclude_pseudo"), True)),
     }
 
     # --- refusals, in the order a user is likely to get them wrong ---
@@ -622,6 +753,73 @@ def _demo() -> None:
 
     # ... but an explicit false stays false: the default must not swallow it.
     assert resolve_params({**base, "include_desc": False})["include_desc"] is False
+
+    # --- areas: ISO3 or numeric code, same request ---
+    # The whole point: a config can be written for humans without changing the
+    # fingerprint of the request. Case and type do not matter either.
+    numeric = resolve_params({**base, "reporter": ["250", "251"]})
+    for written in (["FRA"], ["fra"], "FRA", ["FRA", "FRA"], ["FRA", 251]):
+        got = resolve_params({**base, "reporter": written})
+        assert got["reporter"] == ["250", "251"], (written, got["reporter"])
+        assert params_hash(got) == params_hash(numeric), f"{written} changed the hash"
+
+    # An ISO3 resolves to EVERY one of its codes, because a historical split
+    # needs them all: Belgium is code 58 (Belgium-Luxembourg) until 1998, then
+    # code 56. One code alone would leave a three-year hole in 1996-2023.
+    # Measured: the codes of one ISO3 are disjoint in time, so nothing is
+    # counted twice and the unused code returns no rows.
+    assert resolve_areas(["BEL"], "reporter") == ["56", "58"]
+    assert resolve_areas(["DEU"], "reporter") == ["276", "280"]
+
+    # 'all' and None both mean "no filter", which the API reads as every one.
+    assert resolve_areas("all", "reporter") is None
+    assert resolve_areas("ALL", "reporter") is None
+    assert resolve_areas(None, "reporter") is None
+
+    # Mixed forms, deduplicated, sorted numerically (not as strings: '56'
+    # before '251').
+    assert resolve_areas(["FRA", "251", "BEL"], "reporter") \
+        == ["56", "58", "250", "251"]
+
+    # Refusals, at DAG time rather than against the API.
+    refused_areas = (["XXX"], ["9999"], ["France"], ["F"], ["12AB"])
+    for bad in refused_areas:
+        try:
+            resolve_areas(bad, "reporter")
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad} should be refused")
+
+    # An aggregate is not selectable by ISO3: exclude_pseudo drops it anyway,
+    # so letting it in by name would be a trap.
+    try:
+        resolve_areas(["EUR"], "reporter")          # 97, European Union
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("EUR (an aggregate) should not be selectable")
+
+    # --- pseudo codes ---
+    pseudo = pseudo_codes()
+    assert "0" in pseudo, "World is not an area"
+    assert "97" in pseudo, "European Union is an aggregate reporter"
+    assert "899" in pseudo, "Areas, nes"
+    assert "837" in pseudo, "Bunkers"
+    assert "492" in pseudo, "Europe EU, nes, despite carrying Monaco's ISO3"
+    assert "490" not in pseudo, "490 is Taiwan, a reporting economy: kept"
+    assert "251" not in pseudo and "56" not in pseudo
+    assert 0 < len(pseudo) < 312, len(pseudo)
+
+    # --- what belongs in the hash ---
+    # exclude_pseudo changes the rows delivered, so it must change the stem.
+    assert a["exclude_pseudo"] is True
+    kept = resolve_params({**base, "exclude_pseudo": False})
+    assert params_hash(a) != params_hash(kept), "exclude_pseudo leaked out of the hash"
+    # aggregate_eu only adds a derived file, like mirror: same request.
+    assert params_hash(resolve_params({**base, "aggregate_eu": True})) \
+        == params_hash(a), "aggregate_eu leaked into the hash"
+    assert params_hash(resolve_params({**base, "mirror": False})) \
+        == params_hash(a), "mirror leaked into the hash"
 
     # The hash is stable across processes (hardcoded value: must stay identical).
     assert params_hash(a) == hashlib.sha256(

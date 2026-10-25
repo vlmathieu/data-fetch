@@ -163,13 +163,99 @@ Fixed outside the config, in `FIXED` in
 (goods), `breakdownMode=classic`, `customsCode`/`motCode`/`maxRecords`/
 `proxy_url` at `None`.
 
-Two explicit refusals:
+Explicit refusals, all raised at DAG time, before anything is downloaded:
 
 - **`cmd: TOTAL`**: a single reporter-year pair already goes over the cap
   (France 2015, all products: 674,847 rows).
 - **`hs_revision: auto`**: needs a correspondence table per revision (the
   `mapping` job). v1 runs in `strict`: codes are passed through as given, with
   a warning on every period where a code returns zero rows.
+- **an unknown `classification` or `freq`**, an **unknown country code or
+  ISO3**, a `records_per_call` outside its tier. Unchecked, a typo would reach
+  the API, come back as a swallowed HTTP error, and surface as a `RuntimeError`
+  after five retries.
+
+A key left **empty** in the YAML (`flow:` followed by nothing) means "use the
+default", exactly like a missing key. It parses to `None`, and without that
+rule `flow:` would have meant *every* flow instead of `M, X`.
+
+## Choosing countries
+
+`reporter` and `partner` accept three forms, mixable in one list:
+
+```yaml
+  reporter: all                    # every area, no filter
+  reporter: ['251', '156']         # Comtrade numeric codes
+  reporter: [FRA, CHN]             # ISO3, any case
+  reporter: [FRA, '156']           # mixed is fine
+```
+
+ISO3 codes are resolved to numeric codes **before** the request is
+fingerprinted, so `[FRA]` and `['250', '251']` are the same request and share
+one stem. Writing the readable form costs nothing.
+
+### The limit of ISO3, stated plainly
+
+**15 ISO3 out of 263 point to several Comtrade codes**, because Comtrade keeps
+the historical splits as separate areas. All of the matching codes are sent, and
+that is what you want:
+
+| ISO3 | Codes | 1996 | 2010 | 2023 |
+|---|---|---|---|---|
+| `FRA` | 251 France | 385 | 437 | 475 |
+| | 250 Metropolitan France | 0 | 0 | 0 |
+| `BEL` | 56 Belgium | 0 | 330 | 390 |
+| | 58 Belgium-Luxembourg (...1998) | 282 | 0 | 0 |
+
+Row counts for the default wood selection. The codes of one ISO3 are **disjoint
+in time**: only one carries data in a given year, so nothing is counted twice,
+and sending both is the only way to get Belgium 1996-1998 *and* Belgium
+afterwards in one unbroken series. Same for `DEU` (276 / 280 until 1990), `USA`,
+`CHE`, `NOR`, `IND`, `SDN`, `VNM`, `YEM`.
+
+That assumption is **checked on the real data**, not trusted: if one ISO3 ever
+turns up under two codes in the same period, `comtrade_download` writes a
+double-count warning into the log and the sidecar.
+
+Aggregates cannot be selected by ISO3. `EUR` (the European Union, code 97) is
+refused, because `exclude_pseudo` drops it anyway and letting it in by name
+would be a trap.
+
+### `exclude_pseudo`
+
+On by default. Removes from the delivered file everything that is not a
+country:
+
+| Removed | Why |
+|---|---|
+| `0` World | the sum of every partner; duplicates all bilateral flows |
+| `97` European Union, `975` ASEAN | aggregate reporters. Also: no partner code exists for them, and they report nothing before 2000 and 2010 |
+| every `..., nes` residual | "not elsewhere specified": a catch-all, not a place |
+| `837` Bunkers, `838` Free Zones, `839` Special Categories | not destinations |
+| 13 territories with no ISO3 | Kosovo, Channel Islands, Sarawak, and historical territories |
+
+**`490` "Other Asia, nes" is kept, because it is Taiwan.** UNSD cannot name it,
+so publishes it under a residual label. It is a single reporting economy, not a
+sum of countries: dropping it would delete Taiwan's trade.
+
+Measured weight of the filter on the default selection: `partner=World` alone is
+4.3% of the rows in 2023 and 4.8% in 1996; the aggregate reporters are another
+5.9% in 2023.
+
+The **full table, with the kind of every area and the reason it is classified
+that way**, is in
+[resources/comtrade_areas.csv](resources/comtrade_areas.csv) — GitHub renders it
+as a sortable table. See [resources/README.md](resources/README.md) for why the
+classification is a hand-reviewed list rather than a rule. Refresh it with:
+
+```zsh
+python workflow/scripts/build_comtrade_areas.py   # public endpoints, no key
+```
+
+The preflight counts stay **unfiltered**, deliberately: the ceiling protects
+against a truncated API *response*, which is pre-filter. So the plan's
+`expected_rows_total` is an upper bound of the rows delivered, and matches
+`rows_received` in the sidecar rather than `rows`.
 
 ## Packing and the ceiling
 
@@ -197,23 +283,33 @@ premium (packing under 200,000).
 
 ```
 data/comtrade/
-  comtrade_HS_A_8dbfc6dd_20261024T120000.parquet         # canonical artifact
-  comtrade_HS_A_8dbfc6dd_20261024T120000.csv             # for colleagues
-  comtrade_HS_A_8dbfc6dd_20261024T120000.meta.json       # sidecar
-  comtrade_HS_A_8dbfc6dd_20261024T120000.mirror.parquet  # if mirror: true
-  comtrade_HS_A_8dbfc6dd_20261024T120000.mirror.csv
-  latest_8dbfc6dd.parquet -> ...                         # link by hash
+  comtrade_HS_A_ac3dd013_20261024T120000.parquet         # canonical artifact
+  comtrade_HS_A_ac3dd013_20261024T120000.csv             # for colleagues
+  comtrade_HS_A_ac3dd013_20261024T120000.meta.json       # sidecar
+  comtrade_HS_A_ac3dd013_20261024T120000.mirror.parquet  # if mirror: true
+  comtrade_HS_A_ac3dd013_20261024T120000.mirror.csv
+  comtrade_HS_A_ac3dd013_20261024T120000.eu.parquet      # if aggregate_eu: true
+  comtrade_HS_A_ac3dd013_20261024T120000.eu.csv
+  latest_ac3dd013.parquet -> ...                         # link by hash
 ```
 
-`8dbfc6dd` is a truncated SHA-256 fingerprint of the **resolved** parameter
-set, sorted and normalized, excluding the delivery keys (`format`, `csv_sep`,
-`mirror`, `run_id`). It answers the one question a timestamp does not settle:
-are two files the same run at two dates, and therefore comparable, or two
-different requests?
+`ac3dd013` is a truncated SHA-256 fingerprint of the **resolved** parameter
+set, sorted and normalized. It answers the one question a timestamp does not
+settle: are two files the same run at two dates, and therefore comparable, or
+two different requests?
+
+What is left out of it is a deliberate line: a key is excluded when it changes
+the *delivery* but not the *request*. `format`, `csv_sep`, `run_id`,
+`records_per_call` (a transport ceiling: the same selection on a free and a
+premium key is the same data), and `mirror` and `aggregate_eu`, which add a
+derived file next to the canonical one without touching it.
+
+`exclude_pseudo` **is** in the fingerprint, because it changes the rows
+delivered. Without that, two files sharing a stem could hold different data.
 
 ```zsh
 ls data/comtrade/*.parquet | cut -d_ -f4 | sort -u   # distinct requests
-ls data/comtrade/*8dbfc6dd*                          # every run of one of them
+ls data/comtrade/*ac3dd013*                          # every run of one of them
 ```
 
 The `latest_` link is indexed by hash. A global `latest` becomes wrong as soon
@@ -270,6 +366,46 @@ Two non-negotiable rules apply:
   null stays null. Otherwise a non-reporter turns into a reporter declaring
   zero and the diagnostic disappears.
 
+## The EU as one node
+
+`aggregate_eu: true` adds `{stem}.eu.{parquet,csv}`, where the member states
+are summed into a single `EU` node and **intra-EU trade is deleted**: once both
+ends of a flow are `EU`, the flow is internal to the node and summing it would
+make the aggregate trade with itself. Same two rules as the mirror, guarded
+sums included.
+
+Built **from the member states, never from Comtrade's code 97**. That code is
+unusable here, and measurably so:
+
+- it exists **only as a reporter**. There is no `European Union` partner code,
+  so a selection on 97 would give the EU's own declarations and nothing
+  declared towards it.
+- it reports **nothing before 2000** on the wood codes (ASEAN, nothing before
+  2010), so a 1996-2023 request would carry four silently empty years.
+
+Summing the members has neither problem: it works on rows already downloaded,
+on both sides at once, over the whole period.
+
+Membership is **dated**, in
+[resources/eu_membership.csv](resources/eu_membership.csv): a country is folded
+in only for the years it was a member, so the United Kingdom is inside the EU
+through 2020 and a separate reporter from 2021, and Croatia joins in 2013.
+Without that, a flat list of today's 27 would double count the UK for 25 years,
+since the EU aggregate of those years already contains it. The file is keyed on
+ISO3, so `BEL` picks up both code 56 and code 58 (Belgium-Luxembourg, the
+1996-1998 declarant) with nothing typed by hand.
+
+A **derived file**: the canonical parquet is untouched, so the aggregation can
+be redone, or the Brexit cut-off changed, without downloading anything again.
+It is also a **reduced** view — the per-declaration columns (`isReported`,
+`legacyEstimationFlag`, the estimation flags, customs and transport modes) are
+dropped, because they describe one declaration and mean nothing once several
+are summed. The log names every column it drops. Quantity units stay grouping
+keys, so quantities declared in different units are never added together.
+
+Needs `include_desc: true`: the aggregation keys on the ISO columns, and
+refuses explicitly without them.
+
 ## `comtradeapicall` traps
 
 Checked on the installed 1.2.1 and on the `main` source (1.3.2, pinned here).
@@ -293,13 +429,30 @@ can be declared), and crashes with a `TypeError` if the submission fails.
 
 ## Check
 
+No test suite. Two runnable self-checks instead, both free of the API, of conda
+and of the network, so they still work when the environment does not:
+
 ```zsh
-python workflow/scripts/comtrade_common.py   # stable hash, packing, refusals
+python workflow/scripts/comtrade_common.py   # hash, packing, areas, refusals
+python workflow/scripts/comtrade_polars.py   # EU aggregation
 ```
 
-Verifies that the hash ignores list order and types but not a real change of
-request, that `period.stop` is inclusive, that no period is lost during
-packing, and that `TOTAL` and `hs_revision: auto` are both refused.
+The first verifies that the hash ignores list order, case and types but not a
+real change of request; that `period.stop` is inclusive; that no period is lost
+during packing; that `[FRA]` and `['250','251']` are one request; that `BEL`
+resolves to both of its codes; that an empty YAML key falls back to the default
+while an explicit `false` survives; and that `TOTAL`, `hs_revision: auto`, an
+unknown classification, frequency, country code or ISO3 are all refused.
+
+The second checks the EU aggregation on a dataframe written by hand: nulls stay
+null, intra-EU trade is deleted, the UK is in the EU in 2019 and out of it in
+2021, Croatia is out in 2012 and in from 2013, Belgium's historical code is
+folded in, quantities in different units are not added up, and non-members are
+left alone.
+
+```zsh
+python workflow/scripts/build_comtrade_areas.py   # refresh the areas table
+```
 
 ## Open jobs
 

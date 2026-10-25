@@ -14,11 +14,6 @@ min_version("8.16.0")
 
 configfile: "config/config.yaml"
 
-# No `envvars` directive here, on purpose. It would make the WHOLE workflow
-# fail when comtrade_apikey is missing, preflight included, even though
-# preflight goes through the public endpoints and needs no key. The key is read
-# in comtrade_download.py, and nowhere else.
-
 sys.path.insert(0, str(Path(workflow.basedir) / "scripts"))
 from comtrade_common import resolve_params, params_hash, stem
 
@@ -53,6 +48,8 @@ def targets():
     out.append(f"{OUT}/{STEM}.meta.json")
     if CT.get("mirror"):
         out += [f"{OUT}/{STEM}.mirror.{fmt}" for fmt in FORMATS]
+    if CT.get("aggregate_eu"):
+        out += [f"{OUT}/{STEM}.eu.{fmt}" for fmt in FORMATS]
     return out
 
 

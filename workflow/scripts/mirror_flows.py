@@ -28,6 +28,7 @@ os.environ["POLARS_MAX_THREADS"] = str(snakemake.threads)
 import polars as pl  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from comtrade_polars import guarded_sum  # noqa: E402
 
 logging.basicConfig(
     filename=snakemake.log[0],
@@ -50,20 +51,6 @@ ROLES = {
 }
 
 KEYS = ["period", "cmdCode", "exporterISO", "importerISO"]
-
-
-def guarded_sum(column: str) -> pl.Expr:
-    """Sum that stays null if the group has no value filled in.
-
-    `sum()` alone returns 0 on an all-null group, which turns a non-reporter
-    into a reporter declaring zero.
-    """
-    return (
-        pl.when(pl.col(column).count() > 0)
-        .then(pl.col(column).sum())
-        .otherwise(None)
-        .alias(column)
-    )
 
 
 def one_side(data: pl.DataFrame, flow_code: str, suffix: str) -> pl.DataFrame:

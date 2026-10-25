@@ -25,7 +25,7 @@ comtrade:
 
   period:
     start: 1996
-    stop:  2023             # INCLUSIVE. (No "stop - 2" trap here.)
+    stop:  2023             # INCLUSIVE.
     # list: [199601, 199602]   # overrides start/stop; required if freq: M
 
   cmd: ['4403', '4407', '4412']
@@ -35,12 +35,37 @@ comtrade:
 
   flow: [M, X]              # M import, X export, RX re-export, RM re-import
 
-  reporter: all             # all, or a list of numeric codes ['251', '156']
-  partner:  all             # all, or a list of numeric codes
+  reporter: all             # Three accepted forms, mixable:
+  partner:  all             #   all          every area, no filter
+                            #   ['251']      Comtrade numeric codes
+                            #   ['FRA']      ISO3, any case
+                            # An unknown code or ISO3 is refused at DAG time,
+                            # before any download.
+                            # LIMIT: 15 ISO3 out of 263 point to SEVERAL codes,
+                            # because of historical splits. All of them are
+                            # sent, which is what you want: BEL covers code 58
+                            # (Belgium-Luxembourg, 1996-1998) AND code 56
+                            # afterwards. They are disjoint in time, so nothing
+                            # is counted twice. Full table, with the kind of
+                            # each area: resources/comtrade_areas.csv
 
   partner2:      null       # secondary partner (origin/consignment)
   aggregate_by:  null       # server-side aggregation
   include_desc:  true       # false => label tables are written alongside
+
+  exclude_pseudo: true      # Removes from the delivered file everything that
+                            # is not a country: World (which duplicates every
+                            # bilateral flow), the European Union and ASEAN
+                            # aggregate reporters, every "..., nes" residual,
+                            # Bunkers, Free Zones, Special Categories, and the
+                            # territories with no ISO3.
+                            # KEEPS 490 "Other Asia, nes", which is TAIWAN:
+                            # UNSD cannot name it, so publishes it under a
+                            # residual label. A single reporting economy, not a
+                            # sum of countries.
+                            # Exact list and reason per area, in the `kind`
+                            # column of resources/comtrade_areas.csv
+                            # IN the params hash: it changes the rows delivered.
 
   # --- derived on our side -------------------------------------------------
 
@@ -52,6 +77,20 @@ comtrade:
                             #            correspondence table).
 
   mirror: true              # true => also produces the mirror flow file
+
+  aggregate_eu: false       # true => also produces {stem}.eu.{parquet,csv},
+                            # where EU member states are summed into one 'EU'
+                            # node and intra-EU trade is DELETED.
+                            # Built from the member states, never from
+                            # Comtrade's code 97: that code exists only as a
+                            # reporter (no EU partner code) and reports nothing
+                            # before 2000.
+                            # Membership is dated, so the United Kingdom is
+                            # inside the EU until 2020 and outside afterwards:
+                            # resources/eu_membership.csv
+                            # Needs include_desc: true (keys on the ISO
+                            # columns). A DERIVED file: the canonical parquet
+                            # is untouched, so this is NOT in the params hash.
 
   records_per_call: 100000  # Data API ceiling of YOUR subscription tier.
                             #   100000 = free key (Basic Individual)

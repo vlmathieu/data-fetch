@@ -26,6 +26,7 @@ from comtrade_common import (  # noqa: E402
     call,
     caps,
     params_hash,
+    pseudo_codes,
     selection,
 )
 
@@ -105,6 +106,61 @@ if not frames:
     raise RuntimeError("no data received for this selection")
 
 data = pl.concat(frames, how="vertical_relaxed")
+rows_received = data.height
+dropped_pseudo: dict[str, int] = {}
+
+if params["exclude_pseudo"]:
+    # Drop what is not a country: World (which duplicates every bilateral
+    # flow), the European Union and ASEAN aggregate reporters, the "..., nes"
+    # residuals, Bunkers, Free Zones, and the territories with no ISO3.
+    # Code 490 is KEPT: it is Taiwan, a single reporting economy.
+    #
+    # Keyed on the CODE columns, not the ISO ones: with include_desc: false
+    # there are no ISO columns at all.
+    pseudo = pseudo_codes()
+    sides = [c for c in ("reporterCode", "partnerCode", "partner2Code")
+             if c in data.columns]
+    is_pseudo = pl.any_horizontal(
+        [pl.col(c).cast(pl.String).is_in(pseudo) for c in sides]
+    )
+    for side in sides:
+        counts = (
+            data.filter(pl.col(side).cast(pl.String).is_in(pseudo))
+            .group_by(side).len().sort("len", descending=True)
+        )
+        for row in counts.iter_rows():
+            dropped_pseudo[f"{side}={row[0]}"] = row[1]
+
+    data = data.filter(~is_pseudo)
+    logging.info("exclude_pseudo: %d rows -> %d (%d dropped)",
+                 rows_received, data.height, rows_received - data.height)
+    for key, n in sorted(dropped_pseudo.items(), key=lambda kv: -kv[1]):
+        logging.info("  dropped %s: %d row(s)", key, n)
+
+    if not data.height:
+        raise RuntimeError(
+            "exclude_pseudo removed every row: this selection contains only "
+            "aggregates and areas with no ISO3. Set exclude_pseudo: false if "
+            "that is what you want."
+        )
+
+# Same ISO3 under two codes in one period would double count a country: the
+# historical splits (FRA 250/251, BEL 56/58) are disjoint in time, but that is
+# measured on six pairs out of fifteen, not guaranteed. Checked on real data
+# rather than assumed.
+if "reporterISO" in data.columns:
+    collisions = (
+        data.select("period", "reporterISO", "reporterCode")
+        .unique()
+        .group_by("period", "reporterISO")
+        .len()
+        .filter(pl.col("len") > 1)
+    )
+    for period, iso, n in collisions.iter_rows():
+        message = (f"{iso} appears under {n} different reporter codes in "
+                   f"{period}: possible double count")
+        warnings.append(message)
+        logging.warning(message)
 
 # Integrity check: no requested period may go missing in silence.
 got = set(data["period"].cast(pl.String).unique())
@@ -161,6 +217,11 @@ sidecar = {
     "requested_at": plan["created_at"],
     "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     "rows": data.height,
+    # Rows as received, before exclude_pseudo. The plan's expected_rows_total
+    # is an upper bound of `rows` by design, but it should match this one.
+    "rows_received": rows_received,
+    "rows_dropped_pseudo": rows_received - data.height,
+    "excluded_codes": dropped_pseudo,
     "columns": data.columns,
     "api_calls": {"preflight_free": plan["preflight_calls"],
                   "download_premium": len(plan["packs"])},
