@@ -3,18 +3,21 @@
 Guidance for Claude Code in `data-fetch`. **Read [README.md](README.md) first**:
 it says what the repo does and why. This file says how to work in it.
 
-## Actual state (2026-10-25)
+## Actual state (2026-10-26)
 
 | Rule | State |
 |---|---|
 | `comtrade_preflight` | **verified end to end** against the real API, checks its own plan |
-| `comtrade_download` | **verified end to end** on 2026-10-25, free key, 1 call |
-| `comtrade_mirror` | **verified end to end**, re-run 2026-10-26 with its check |
-| `comtrade_eu` | **verified end to end**, re-run 2026-10-26, 0 API calls |
+| `comtrade_download` | **verified end to end**, free key, 1 call |
+| `comtrade_mirror` | **verified end to end**, with its conservation check |
+| `comtrade_eu` | **verified end to end**, 0 API calls |
 
-Everything above ran under Snakemake **8.25.5**. The preflight was also
-verified under **9.23.1**, with an identical plan; the other three have not
-been run under 9.
+**All four rules are verified under BOTH Snakemake versions**: 8.25.5
+(Python 3.12) and 9.23.1 (Python 3.14). The full run of 2026-10-26 under
+9.23.1 produced the three parquets **byte-identical** to the 8.25.5 run of the
+same request, and all 21 checks passed on both. That compatibility is
+measured, not assumed — it is what the `snakemake` import fix and the absence
+of `envvars:` were for.
 
 All four rules have now run against real data. The first download, on
 2026-10-25 (2000-2003, code 4403, M+X, all reporters), found **two** bugs the
@@ -122,14 +125,14 @@ All found by running things, not by rereading them.
   standalone in both versions, 8 included: it was never an API. Hence the
   `# noqa: F821` on the first use in each script — a linter cannot see the
   preamble.
-- **Two Snakemake versions are in play here**, and they are not interchangeable
-  in their internals: `miniconda3` base has **8.25.5** (Python 3.12), the
-  `snakemake` conda env has **9.23.1** (Python 3.14). `min_version("8.16.0")`
-  accepts both, and the repo is kept compatible with both. The preflight was
-  verified under 9.23.1 and produces a plan **identical** to the one from
-  8.25.5, byte for byte on the request, the counts and the packs. `download`,
-  `mirror` and `eu` have only ever run under 8.25.5: say that, rather than that
-  they work under 9.
+- **Two Snakemake versions are in play here**, and while the workflow now runs
+  identically on both, their internals are not interchangeable: `miniconda3`
+  base has **8.25.5** (Python 3.12), the `snakemake` conda env has **9.23.1**
+  (Python 3.14). `min_version("8.16.0")` accepts both. Measured on 2026-10-26:
+  the whole workflow ran end to end under 9.23.1 and delivered parquets
+  identical to the 8.25.5 run of the same request, all 21 checks passing on
+  both. Keep it that way — the import trap below is the one thing that broke
+  it, and it will not be the last.
 - **Never `from __future__ import annotations` in a `script:` file.**
   Snakemake inserts a preamble before the file's content, so the import is no
   longer on the first line and you get a `SyntaxError`. The env is Python 3.12:
@@ -419,6 +422,17 @@ CSV read-back, same day, on the three delivered CSVs:
 That 16,529 is what makes the check non-vacuous: the quoting claim the code
 used to state in prose is now measured. A file with 0 such fields gets a pass
 whose detail says the quoting was never exercised.
+
+Full run under Snakemake 9.23.1 / Python 3.14, 2026-10-26, same request,
+`mirror: true` and `aggregate_eu: true`:
+
+```
+  5 rules, 4 free counting calls, 1 keyed call
+  16,934 received = 16,934 counted, 15,630 delivered, 0 warning
+  21 checks, all pass. `revision` passes without re-reading the vintage,
+    because the counts matched: nothing to explain, no call spent.
+  parquet, mirror.parquet and eu.parquet BYTE-IDENTICAL to the 8.25.5 run
+```
 
 Orders of magnitude, all reporters, M+X:
 

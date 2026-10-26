@@ -194,9 +194,11 @@ if gap:
         logging.warning("vintage could not be re-read: %s", exc)
 verdict = revision_finding(gap, comparison)
 findings.append(verdict)
-if gap:
-    logging.warning("check %-16s %-4s %s", verdict["check"],
-                    verdict["status"], verdict["detail"])
+# Logged whether or not it fired, like every other check: a log showing one
+# fewer line than the sidecar's `checks` block is a puzzle nobody needs.
+log = logging.info if verdict["status"] == "pass" else logging.warning
+log("check %-16s %-4s %s", verdict["check"], verdict["status"],
+    verdict["detail"])
 
 warnings += [f"{f['check']}: {f['detail']}"
              for f in findings if f["status"] != "pass"]
