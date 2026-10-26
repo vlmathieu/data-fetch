@@ -34,7 +34,11 @@ from comtrade_common import (  # noqa: E402
     pseudo_codes,
     selection,
 )
-from comtrade_polars import drop_pseudo  # noqa: E402
+from comtrade_polars import (  # noqa: E402
+    check_download,
+    drop_pseudo,
+    raise_on_fail,
+)
 
 logging.basicConfig(
     filename=snakemake.log[0],  # noqa: F821
@@ -86,6 +90,17 @@ def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
     )
     rows = len(frame)
 
+    if rows == 0 and pack["expected_rows"] > 0:
+        # The free preflight counted rows here and the keyed call returned
+        # none. That is not missing data, it is something broken: a silently
+        # swallowed HTTP error, or a selection that did not reach the API as
+        # written. It used to be a warning buried in the sidecar.
+        raise RuntimeError(
+            f"[{label}] 0 rows received, {pack['expected_rows']} counted by "
+            f"the preflight. The request went out but came back empty: check "
+            f"the log above for an API error body."
+        )
+
     if rows >= fail_rows:
         raise RuntimeError(
             f"[{label}] {rows} rows >= the {fail_rows} getFinalData ceiling: "
@@ -127,6 +142,9 @@ for pack in plan["packs"]:
     if frame.height:
         frames.append(frame)
     else:
+        # Only reachable when the preflight itself counted 0 for every period
+        # of the pack, which it has already warned about. An unexpected empty
+        # pack raises inside fetch_pack instead.
         warnings.append(f"pack {','.join(pack['periods'])}: 0 rows received")
 
 if not frames:
@@ -134,6 +152,29 @@ if not frames:
 
 data = pl.concat(frames, how="vertical_relaxed")
 rows_received = data.height
+
+# Checks BEFORE the filter and before any write, and the order is not a
+# detail. The preflight counts are pre-filter by design, so comparing them
+# after exclude_pseudo reports a deficit on every period of a healthy run:
+# measured at -326 to -328 per period on 2026-10-26. And a failing check must
+# leave no file behind: Snakemake deletes the `output:` of a failed job but
+# keeps its `log:`, so the diagnosis below survives the failure while the
+# non-conforming dataset does not.
+#
+# The logic is in comtrade_polars, where it is testable: a `script:` file like
+# this one cannot be imported, so a check written here could never be shown a
+# broken dataset to prove it detects anything.
+findings = check_download(data, plan)
+for finding in findings:
+    log = logging.info if finding["status"] == "pass" else logging.warning
+    log("check %-16s %-4s %s", finding["check"], finding["status"],
+        finding["detail"])
+# Anything not passing also goes in `warnings`, so that what already read that
+# field loses nothing to the move.
+warnings += [f"{f['check']}: {f['detail']}"
+             for f in findings if f["status"] != "pass"]
+raise_on_fail(findings, "comtrade_download")
+
 dropped_pseudo: dict[str, int] = {}
 
 if params["exclude_pseudo"]:
@@ -160,31 +201,6 @@ if params["exclude_pseudo"]:
             "aggregates and areas with no ISO3. Set exclude_pseudo: false if "
             "that is what you want."
         )
-
-# Same ISO3 under two codes in one period would double count a country: the
-# historical splits (FRA 250/251, BEL 56/58) are disjoint in time, but that is
-# measured on six pairs out of fifteen, not guaranteed. Checked on real data
-# rather than assumed.
-if "reporterISO" in data.columns:
-    collisions = (
-        data.select("period", "reporterISO", "reporterCode")
-        .unique()
-        .group_by("period", "reporterISO")
-        .len()
-        .filter(pl.col("len") > 1)
-    )
-    for period, iso, n in collisions.iter_rows():
-        message = (f"{iso} appears under {n} different reporter codes in "
-                   f"{period}: possible double count")
-        warnings.append(message)
-        logging.warning(message)
-
-# Integrity check: no requested period may go missing in silence.
-got = set(data["period"].cast(pl.String).unique())
-missing = sorted(set(params["period"]) - got)
-if missing:
-    warnings.append(f"requested periods absent from the result: {missing}")
-    logging.warning("absent periods: %s", missing)
 
 logging.info("total: %d rows, %d columns", data.height, data.width)
 
@@ -239,6 +255,11 @@ sidecar = {
     "rows_received": rows_received,
     "rows_dropped_pseudo": rows_received - data.height,
     "excluded_codes": dropped_pseudo,
+    # One entry per check, so a run is auditable without reading the log.
+    # Only written on a successful run: a failing check raises before this
+    # point, and the log is then the record.
+    "checks": {f["check"]: {k: v for k, v in f.items() if k != "check"}
+               for f in findings},
     "columns": data.columns,
     "api_calls": {"preflight_free": plan["preflight_calls"],
                   "download_premium": len(plan["packs"])},

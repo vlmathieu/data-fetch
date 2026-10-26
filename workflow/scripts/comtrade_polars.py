@@ -246,9 +246,9 @@ def aggregate_eu(data: pl.DataFrame, members: pl.DataFrame
             per-declaration columns are dropped, because they describe a single
             declaration and mean nothing once several are summed.
         report : dict
-            'intra_eu_dropped', 'columns_dropped', 'rows_in', 'rows_out',
-            'rows_touching_eu'. Logged by the caller, so nothing disappears
-            silently.
+            'intra_eu_dropped', 'intra_eu_value', 'columns_dropped',
+            'rows_in', 'rows_out', 'rows_touching_eu'. Logged by the caller,
+            so nothing disappears silently.
     """
     rows_in = data.height
 
@@ -263,7 +263,12 @@ def aggregate_eu(data: pl.DataFrame, members: pl.DataFrame
     # Intra-EU trade: both ends are now the same node, so the flow is internal
     # to it. Summing it would make the aggregate trade with itself.
     both = pl.col("reporter_is_eu") & pl.col("partner_is_eu")
-    intra = data.filter(both).height
+    intra_rows = data.filter(both)
+    intra = intra_rows.height
+    # The value deleted, not only the rows: it is the right-hand side of the
+    # conservation equation check_eu verifies.
+    intra_value = (intra_rows["primaryValue"].sum()
+                   if "primaryValue" in data.columns else None)
     data = data.filter(~both).drop("reporter_is_eu", "partner_is_eu", "year")
 
     keys = [c for c in EU_KEYS if c in data.columns]
@@ -286,12 +291,566 @@ def aggregate_eu(data: pl.DataFrame, members: pl.DataFrame
         "rows_in": rows_in,
         "rows_out": result.height,
         "intra_eu_dropped": intra,
+        "intra_eu_value": intra_value,
         "columns_dropped": dropped,
         "rows_touching_eu": result.filter(
             (pl.col("reporterISO") == EU_ISO)
             | (pl.col("partnerISO") == EU_ISO)
         ).height,
     }
+
+
+# --- download checks --------------------------------------------------------
+# What these guard against is NOT a crash: a crash is loud and cheap. It is a
+# file that is plausible but wrong -- it opens, the dtypes are right, the row
+# count looks reasonable, and nobody notices until it is published. Both bugs
+# found on this repo so far were of that family, and both were found by a real
+# run rather than by rereading the code.
+#
+# Every check returns findings instead of raising, so that ONE run reports
+# everything that is off rather than stopping at the first problem. The caller
+# logs them, then calls raise_on_fail().
+
+# Columns without which the file cannot be interpreted at all. Code columns
+# only: include_desc: false delivers no ISO and no Desc column.
+REQUIRED = ("typeCode", "freqCode", "period", "reporterCode", "partnerCode",
+            "flowCode", "classificationCode", "cmdCode", "primaryValue")
+
+# Additionally required when include_desc is true. Checking them is what makes
+# the ISO3 double-count check unconditional: the version of that check written
+# inside the download script was wrapped in `if "reporterISO" in data.columns`,
+# so a renamed column would have switched the guard off in silence.
+REQUIRED_DESC = ("reporterISO", "partnerISO", "reporterDesc", "partnerDesc")
+
+# What identifies one declaration. A duplicate on this key is unambiguously a
+# bug: two packs overlapping on a period, or bisect_codes handing out two
+# non-disjoint code subsets, would duplicate rows that are each individually
+# valid, in a file whose total looks plausible -- and every analysis downstream
+# would count them twice.
+#
+# Code columns only, same reason as REQUIRED. Measured on the real download of
+# 2026-10-26: 0 duplicates on 15,630 rows, and every subset of this key down to
+# five columns was still unique, so the key is wide enough not to raise a false
+# alarm and narrow enough to catch an exact duplicate.
+ROW_KEYS = ("period", "flowCode", "reporterCode", "partnerCode",
+            "partner2Code", "cmdCode", "classificationCode",
+            "customsCode", "mosCode", "motCode",
+            "qtyUnitCode", "altQtyUnitCode")
+
+# Relative tolerance for the conservation checks. Sums of f64 over tens of
+# thousands of rows do not come back bit-identical, so an exact == would fail
+# on arithmetic rather than on a bug.
+#
+# 1e-12 and not something looser: on the real total of 6.7e10 that leaves 0.07
+# of slack, while the accumulation error of summing ~16,000 f64 values is
+# around 1e-3. A looser 1e-9 would have allowed 67 units of drift, enough to
+# hide a whole lost row -- caught by the self-check below, which is why the
+# number is this one.
+TOLERANCE = 1e-12
+
+
+def _finding(check: str, status: str, detail: str, **extra) -> dict:
+    """One check result.
+
+    Parameters
+    ----------
+    check : str
+        Short name, used as the key in the sidecar's 'checks' block.
+    status : {'pass', 'warn', 'fail'}
+        'fail' stops the run before anything is written; 'warn' is recorded
+        and the run continues.
+    detail : str
+        One line, readable in a log without any other context.
+    **extra
+        Numbers worth keeping in the sidecar ('expected', 'received'...).
+
+    Returns
+    -------
+    dict
+        {'check', 'status', 'detail', ...extra}.
+    """
+    return {"check": check, "status": status, "detail": detail, **extra}
+
+
+def raise_on_fail(findings: list[dict], label: str) -> None:
+    """Raises if any finding failed, naming every one of them.
+
+    Called BEFORE any file is written, so a non-conforming dataset is never
+    delivered. Snakemake deletes the `output:` of a failed job but keeps its
+    `log:`, so the diagnosis survives the failure.
+
+    Parameters
+    ----------
+    findings : list of dict
+        Output of check_download, check_mirror or check_eu.
+    label : str
+        What was checked, for the first line of the message.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    RuntimeError
+        At least one finding has status 'fail'. The message lists them all,
+        not just the first.
+    """
+    failed = [f for f in findings if f["status"] == "fail"]
+    if failed:
+        lines = "\n".join(f"  - {f['check']}: {f['detail']}" for f in failed)
+        raise RuntimeError(
+            f"{label}: {len(failed)} check(s) failed, nothing written.\n"
+            f"{lines}"
+        )
+
+
+def _check_schema(data: pl.DataFrame, params: dict) -> list[dict]:
+    """Are the columns the rest of the pipeline reads actually there?
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received from the API, before any filtering.
+    params : dict
+        plan['params_resolved']; only 'include_desc' is read.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'fail' if a required column is missing.
+    """
+    expected = list(REQUIRED)
+    if params["include_desc"]:
+        expected += list(REQUIRED_DESC)
+    missing = [c for c in expected if c not in data.columns]
+    if missing:
+        return [_finding(
+            "schema", "fail",
+            f"columns missing from the response: {missing}. The API changed, "
+            f"or the request did not ask for what we think it did.",
+            missing=missing,
+        )]
+    return [_finding("schema", "pass",
+                     f"{len(expected)} required column(s) present, "
+                     f"{data.width} in all")]
+
+
+def _check_counts(data: pl.DataFrame, plan: dict) -> list[dict]:
+    """Rows received against the rows the free preflight counted.
+
+    MUST run before drop_pseudo. The preflight counts are pre-filter by
+    design, so comparing after the filter reports a deficit on every period of
+    a perfectly healthy run: measured at -326 to -328 per period on
+    2026-10-26.
+
+    'warn' and not 'fail', deliberately: Comtrade rewrites history, so a gap
+    between the preflight and the download can be a legitimate revision.
+    Telling the two apart needs datasetChecksum, which is not checked here, and
+    blocking a workflow on a revision would be worse than warning about it.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received, before any filtering.
+    plan : dict
+        The plan.json, read for 'counts' and 'expected_rows_total'.
+
+    Returns
+    -------
+    list of dict
+        Two findings: 'counts_period' and 'counts_total'.
+    """
+    findings = []
+
+    got = dict(
+        data.select(pl.col("period").cast(pl.String))
+        .group_by("period").len().iter_rows()
+    )
+    gaps = {
+        period: {"expected": expected, "received": got.get(period, 0)}
+        for period, expected in plan["counts"].items()
+        if got.get(period, 0) != expected
+    }
+    if gaps:
+        worst = ", ".join(f"{p} {g['received']}/{g['expected']}"
+                          for p, g in list(gaps.items())[:5])
+        findings.append(_finding(
+            "counts_period", "warn",
+            f"{len(gaps)} period(s) differ from the preflight count: "
+            f"{worst}. A Comtrade revision between preflight and download "
+            f"does this; so does a bug. datasetChecksum settles it.",
+            gaps=gaps,
+        ))
+    else:
+        findings.append(_finding(
+            "counts_period", "pass",
+            f"{len(plan['counts'])} period(s) match the preflight count"))
+
+    expected_total = plan["expected_rows_total"]
+    if data.height != expected_total:
+        findings.append(_finding(
+            "counts_total", "warn",
+            f"{data.height} rows received, {expected_total} counted by the "
+            f"preflight ({data.height - expected_total:+d})",
+            expected=expected_total, received=data.height))
+    else:
+        findings.append(_finding(
+            "counts_total", "pass", f"{data.height} rows, as counted",
+            expected=expected_total, received=data.height))
+    return findings
+
+
+def _check_request(data: pl.DataFrame, params: dict) -> list[dict]:
+    """Is what came back what was asked for?
+
+    The failure this exists for: being delivered another classification,
+    another frequency or another product, without a word. Each one makes the
+    file silently answer a different question from the one asked.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received, before any filtering.
+    params : dict
+        plan['params_resolved'].
+
+    Returns
+    -------
+    list of dict
+        Findings 'classification', 'frequency', 'flow' and 'cmd'.
+    """
+    from comtrade_common import FIXED  # noqa: PLC0415
+
+    findings = []
+
+    # --- classification ---
+    # NOT an equality when 'HS' is asked. 'HS' means "the revision in force
+    # that year", and each declarant has its own: measured on 2026-10-26,
+    # 2000-2003 in HS comes back as H0, H1 AND H2, with all three inside 2002
+    # alone. What would be wrong is an S1 or a BEC.
+    requested = params["classification"]
+    delivered = sorted(data["classificationCode"].unique().to_list())
+    if requested == "HS":
+        stray = [c for c in delivered
+                 if not (len(c) == 2 and c[0] == "H" and c[1].isdigit())]
+        findings.append(
+            _finding("classification", "fail",
+                     f"HS asked, non-HS classification(s) delivered: {stray}",
+                     delivered=delivered)
+            if stray else
+            _finding("classification", "pass",
+                     f"HS -> {', '.join(delivered)} (the revision in force "
+                     f"each year)", delivered=delivered)
+        )
+    else:
+        # shortcut: a forced revision is only WARNED about, because what the
+        # API labels converted rows with is unmeasured. The public preview
+        # cannot settle it: asked on 2026-10-26, clCode H2 returns
+        # {"error":"Something went wrong"} and H3 returns 0 rows, while HS on
+        # the same call shape returns 500 rows. Upgrade to 'fail' once a real
+        # forced-revision download has been seen.
+        wrong = [c for c in delivered if c != requested]
+        findings.append(
+            _finding("classification", "warn",
+                     f"{requested} asked, delivered: {delivered}. Unmeasured "
+                     f"whether UNSD labels converted rows with the target "
+                     f"revision or the source one.", delivered=delivered)
+            if wrong else
+            _finding("classification", "pass", f"{requested} as asked",
+                     delivered=delivered)
+        )
+
+    # --- frequency and type ---
+    freq = sorted(data["freqCode"].unique().to_list())
+    kind = sorted(data["typeCode"].unique().to_list())
+    if freq != [params["freq"]] or kind != [FIXED["type"]]:
+        findings.append(_finding(
+            "frequency", "fail",
+            f"freqCode {freq} / typeCode {kind} delivered, "
+            f"['{params['freq']}'] / ['{FIXED['type']}'] asked"))
+    else:
+        findings.append(_finding("frequency", "pass",
+                                 f"freqCode {freq}, typeCode {kind}"))
+
+    # --- flow ---
+    # 'warn': mirror_flows already logs the flows it ignores, and a selection
+    # may legitimately bring back RX or RM. Compared to what was asked, not to
+    # a hard-coded {M, X}.
+    asked_flow = set(params["flow"])
+    got_flow = set(data["flowCode"].unique().to_list())
+    extra_flow = sorted(got_flow - asked_flow)
+    findings.append(
+        _finding("flow", "warn",
+                 f"flow code(s) delivered that were not asked for: "
+                 f"{extra_flow} (asked: {sorted(asked_flow)})",
+                 extra=extra_flow)
+        if extra_flow else
+        _finding("flow", "pass", f"flowCode {sorted(got_flow)}")
+    )
+
+    # --- products ---
+    asked_cmd = set(params["cmd"])
+    got_cmd = set(data["cmdCode"].cast(pl.String).unique().to_list())
+    extra_cmd = sorted(got_cmd - asked_cmd)
+    findings.append(
+        _finding("cmd", "fail",
+                 f"product code(s) delivered that were not asked for: "
+                 f"{extra_cmd[:10]} ({len(extra_cmd)} in all). The selection "
+                 f"did not reach the API as intended.", extra=extra_cmd)
+        if extra_cmd else
+        _finding("cmd", "pass",
+                 f"{len(got_cmd)} product code(s), all asked for")
+    )
+    return findings
+
+
+def _check_periods(data: pl.DataFrame, params: dict) -> list[dict]:
+    """Periods delivered against periods asked for, both ways.
+
+    Two sides of one coin, and only one of them was checked before: a missing
+    period was detected, a period IN EXCESS never was -- and that one would
+    mean a pack parameter went out wrong.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received, before any filtering. Before, because after it a
+        period can legitimately disappear if every one of its rows was a
+        pseudo-country.
+    params : dict
+        plan['params_resolved'], read for 'period'.
+
+    Returns
+    -------
+    list of dict
+        Findings 'periods_extra' (fail) and 'periods_missing' (warn).
+    """
+    asked = set(params["period"])
+    got = set(data.select(pl.col("period").cast(pl.String))["period"].unique())
+
+    extra = sorted(got - asked)
+    missing = sorted(asked - got)
+    return [
+        _finding("periods_extra", "fail",
+                 f"periods delivered that were not asked for: {extra}",
+                 extra=extra)
+        if extra else
+        _finding("periods_extra", "pass",
+                 f"{len(got)} period(s), all asked for"),
+
+        _finding("periods_missing", "warn",
+                 f"periods asked for and absent from the result: {missing}",
+                 missing=missing)
+        if missing else
+        _finding("periods_missing", "pass", "no period missing"),
+    ]
+
+
+def _check_iso3(data: pl.DataFrame, params: dict) -> list[dict]:
+    """One ISO3 under two reporter codes in one period double counts a country.
+
+    The historical splits (FRA 250/251, BEL 56/58) are disjoint in time, but
+    that is measured on six pairs out of fifteen, not guaranteed by UNSD. So
+    it is checked on the real rows rather than assumed.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received, before any filtering.
+    params : dict
+        plan['params_resolved']; the check is skipped unless include_desc,
+        which is the only case where the ISO columns exist.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'warn' on a collision.
+    """
+    if not params["include_desc"]:
+        return [_finding("iso3_unique", "pass",
+                         "skipped: no ISO column without include_desc")]
+
+    collisions = (
+        data.select("period", "reporterISO", "reporterCode")
+        .unique()
+        .group_by("period", "reporterISO")
+        .len()
+        .filter(pl.col("len") > 1)
+        .sort("period", "reporterISO")
+    )
+    if collisions.height:
+        pairs = [f"{iso} in {period} ({n} codes)"
+                 for period, iso, n in collisions.iter_rows()]
+        return [_finding("iso3_unique", "warn",
+                         f"possible double count: {'; '.join(pairs)}",
+                         collisions=pairs)]
+    return [_finding("iso3_unique", "pass",
+                     "no ISO3 under two reporter codes in one period")]
+
+
+def _check_duplicates(data: pl.DataFrame) -> list[dict]:
+    """No declaration may appear twice.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received, before any filtering.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'fail' with the number of surplus rows.
+    """
+    keys = [c for c in ROW_KEYS if c in data.columns]
+    extra = data.height - data.select(keys).unique().height
+    if extra:
+        worst = (
+            data.group_by(keys).len().filter(pl.col("len") > 1)
+            .sort("len", descending=True).head(3)
+        )
+        return [_finding(
+            "duplicates", "fail",
+            f"{extra} surplus row(s) on the declaration key: the same "
+            f"declaration was received more than once, which double counts it "
+            f"in every analysis downstream. First group(s): "
+            f"{worst.to_dicts()}",
+            extra_rows=extra, keys=keys,
+        )]
+    return [_finding("duplicates", "pass", "no duplicate declaration",
+                     extra_rows=0, keys=keys)]
+
+
+def check_download(data: pl.DataFrame, plan: dict) -> list[dict]:
+    """Every check on a freshly downloaded dataset, before it is filtered.
+
+    Call this between the concat of the packs and drop_pseudo, and before any
+    write: the counts are pre-filter, and a failing check must not leave a file
+    behind.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received from the API, packs concatenated, nothing filtered.
+    plan : dict
+        The plan.json produced by comtrade_preflight. Passed whole rather than
+        as separate arguments so that the counts and the resolved request
+        cannot come from two different runs.
+
+    Returns
+    -------
+    list of dict
+        Findings, in check order. The schema check comes first and SHORT
+        CIRCUITS: with a required column missing, every later check would
+        either crash or report nonsense.
+    """
+    params = plan["params_resolved"]
+
+    findings = _check_schema(data, params)
+    if findings[0]["status"] == "fail":
+        return findings
+
+    findings += _check_counts(data, plan)
+    findings += _check_request(data, params)
+    findings += _check_periods(data, params)
+    findings += _check_iso3(data, params)
+    findings += _check_duplicates(data)
+    return findings
+
+
+def _conserved(left: float | None, right: float | None) -> bool:
+    """Are two sums equal within TOLERANCE, treating null as 0.0?"""
+    a, b = float(left or 0.0), float(right or 0.0)
+    return abs(a - b) <= TOLERANCE * max(1.0, abs(a), abs(b))
+
+
+def check_mirror(source: pl.DataFrame, mirror: pl.DataFrame) -> list[dict]:
+    """The mirror must move value around, never lose any.
+
+    Catches a row silently dropped by the group_by or the full join. The two
+    declarations are never reconciled, so each side is checked against its own
+    flow direction only.
+
+    Compared on NON-NULL values: guarded_sum keeps a null group null, and
+    polars' sum() skips nulls, so any other comparison would fail on behaviour
+    that is deliberate.
+
+    Parameters
+    ----------
+    source : polars dataframe
+        The canonical parquet the mirror was built from.
+    mirror : polars dataframe
+        The mirror, with its '_exp' and '_imp' columns.
+
+    Returns
+    -------
+    list of dict
+        One finding per side present, 'fail' if value went missing.
+    """
+    findings = []
+    for flow, suffix, role in (("X", "exp", "exporter"),
+                               ("M", "imp", "importer")):
+        column = f"primaryValue_{suffix}"
+        if (column not in mirror.columns
+                or "primaryValue" not in source.columns):
+            continue
+        expected = (source.filter(pl.col("flowCode") == flow)["primaryValue"]
+                    .sum())
+        received = mirror[column].sum()
+        findings.append(
+            _finding(f"mirror_{suffix}", "pass",
+                     f"{role} value conserved: {received}",
+                     expected=expected, received=received)
+            if _conserved(expected, received) else
+            _finding(f"mirror_{suffix}", "fail",
+                     f"{role} value NOT conserved: {received} in the mirror "
+                     f"against {expected} in the {flow} rows of the source. "
+                     f"Rows were lost in the group_by or the join.",
+                     expected=expected, received=received)
+        )
+    return findings
+
+
+def check_eu(source: pl.DataFrame, result: pl.DataFrame, report: dict
+             ) -> list[dict]:
+    """The EU node must sum its members exactly, minus the intra-EU trade.
+
+    The one arithmetic statement the aggregation makes: output == input minus
+    what was deliberately deleted. Verified by hand on 2026-10-25
+    (67,175,423,427 - 6,946,311,657 = 60,229,111,770, gap 0.00); a check by
+    hand is not a check.
+
+    Parameters
+    ----------
+    source : polars dataframe
+        The canonical parquet, before aggregation.
+    result : polars dataframe
+        The aggregated frame returned by aggregate_eu.
+    report : dict
+        Its report, read for 'intra_eu_value'.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'fail' if value was created or lost.
+    """
+    if "primaryValue" not in source.columns:
+        return []
+    total = source["primaryValue"].sum()
+    intra = report["intra_eu_value"]
+    expected = float(total or 0.0) - float(intra or 0.0)
+    received = result["primaryValue"].sum()
+    return [
+        _finding("eu_conserved", "pass",
+                 f"value conserved: {received} = {total} - {intra}",
+                 expected=expected, received=received)
+        if _conserved(expected, received) else
+        _finding("eu_conserved", "fail",
+                 f"value NOT conserved: {received} in the EU file against "
+                 f"{expected} expected ({total} raw - {intra} intra-EU). The "
+                 f"aggregation created or lost value.",
+                 expected=expected, received=received)
+    ]
 
 
 # --- check ------------------------------------------------------------------
@@ -482,6 +1041,196 @@ def _demo() -> None:
     codes = set(real["code"])
     assert {"56", "58"} <= codes, "Belgium must carry both its codes"
     assert real.filter(pl.col("code") == "826")["to"][0] == 2020, "GBR to 2020"
+
+    # --- download checks ---
+    # Every check gets a deliberately BROKEN dataset as well as a healthy one.
+    # A check that is only ever shown a good file proves nothing: it would pass
+    # just as happily if its body were `return []`.
+    #
+    # Dtypes copied from the real response of 2026-10-26, not invented: codes
+    # are i64, period and cmdCode are strings, motCode is i64 while customsCode
+    # and mosCode are strings. The two bugs this repo has had both came from a
+    # fixture whose schema differed from the API's.
+    def row(**over) -> dict:
+        """One row carrying every column the checks read."""
+        base = {"typeCode": "C", "freqCode": "A", "period": "2000",
+                "reporterCode": 251, "reporterISO": "FRA",
+                "reporterDesc": "France", "flowCode": "M",
+                "partnerCode": 276, "partnerISO": "DEU",
+                "partnerDesc": "Germany", "partner2Code": 0,
+                "classificationCode": "H1", "cmdCode": "4403",
+                "customsCode": "C00", "mosCode": "0", "motCode": 0,
+                "qtyUnitCode": 8, "altQtyUnitCode": -1,
+                "primaryValue": 100.0}
+        return {**base, **over}
+
+    SCHEMA = {"typeCode": pl.String, "freqCode": pl.String,
+              "period": pl.String, "reporterCode": pl.Int64,
+              "reporterISO": pl.String, "reporterDesc": pl.String,
+              "flowCode": pl.String, "partnerCode": pl.Int64,
+              "partnerISO": pl.String, "partnerDesc": pl.String,
+              "partner2Code": pl.Int64, "classificationCode": pl.String,
+              "cmdCode": pl.String, "customsCode": pl.String,
+              "mosCode": pl.String, "motCode": pl.Int64,
+              "qtyUnitCode": pl.Int64, "altQtyUnitCode": pl.Int64,
+              "primaryValue": pl.Float64}
+
+    def trade(rows: list[dict]) -> pl.DataFrame:
+        return pl.DataFrame(rows, schema=SCHEMA)
+
+    # Two periods, two partners: a plausible miniature of a real download.
+    good = trade([
+        row(period="2000", partnerCode=276, partnerISO="DEU"),
+        row(period="2000", partnerCode=56, partnerISO="BEL"),
+        row(period="2001", partnerCode=276, partnerISO="DEU",
+            classificationCode="H2"),
+    ])
+    good_plan = {
+        "params_resolved": {"classification": "HS", "freq": "A",
+                            "flow": ["M", "X"], "cmd": ["4403"],
+                            "period": ["2000", "2001"], "include_desc": True},
+        "counts": {"2000": 2, "2001": 1},
+        "expected_rows_total": 3,
+    }
+
+    def status_of(findings: list[dict], name: str) -> str:
+        """The status of one named check, or '' if it was not run."""
+        return next((f["status"] for f in findings if f["check"] == name), "")
+
+    # A healthy dataset: everything passes, and nothing is left out.
+    findings = check_download(good, good_plan)
+    assert all(f["status"] == "pass" for f in findings), findings
+    assert {f["check"] for f in findings} == {
+        "schema", "counts_period", "counts_total", "classification",
+        "frequency", "flow", "cmd", "periods_extra", "periods_missing",
+        "iso3_unique", "duplicates"}, {f["check"] for f in findings}
+    # HS delivering several revisions is NORMAL, and the pass says which.
+    assert "H1, H2" in next(f for f in findings
+                            if f["check"] == "classification")["detail"]
+    raise_on_fail(findings, "demo")          # must not raise
+
+    # B2, schema: a missing required column stops everything, because every
+    # later check would either crash or report nonsense on it.
+    broken = check_download(good.drop("primaryValue"), good_plan)
+    assert broken[0]["check"] == "schema" and broken[0]["status"] == "fail"
+    assert len(broken) == 1, "the schema check must short circuit"
+    try:
+        raise_on_fail(broken, "demo")
+    except RuntimeError as exc:
+        assert "schema" in str(exc) and "nothing written" in str(exc)
+    else:
+        raise AssertionError("a failed check must raise")
+
+    # include_desc: false drops the ISO columns legitimately, and then the
+    # ISO3 collision check has nothing to look at rather than being skipped
+    # in silence.
+    no_desc_plan = {**good_plan,
+                    "params_resolved": {**good_plan["params_resolved"],
+                                        "include_desc": False}}
+    no_desc = check_download(
+        good.drop("reporterISO", "partnerISO", "reporterDesc", "partnerDesc"),
+        no_desc_plan)
+    assert all(f["status"] == "pass" for f in no_desc), no_desc
+
+    # C, duplicates: the same declaration received twice. The file would open,
+    # the dtypes would be right, and every total downstream would be wrong.
+    doubled = pl.concat([good, good.head(1)])
+    found = _check_duplicates(doubled)
+    assert found[0]["status"] == "fail" and found[0]["extra_rows"] == 1, found
+    # Two rows differing by ONE key column are not duplicates.
+    one_key_apart = trade([row(), row(motCode=1)])
+    assert _check_duplicates(one_key_apart)[0]["status"] == "pass"
+
+    # A2, counts: a gap is warned about, never fatal -- a Comtrade revision
+    # between the preflight and the download produces exactly this.
+    wrong_counts = {**good_plan, "counts": {"2000": 99, "2001": 1},
+                    "expected_rows_total": 100}
+    found = _check_counts(good, wrong_counts)
+    assert [f["status"] for f in found] == ["warn", "warn"], found
+    assert found[1]["expected"] == 100 and found[1]["received"] == 3
+    # and a run holding such a warning still goes through.
+    raise_on_fail(check_download(good, wrong_counts), "demo")
+
+    # D1, classification: HS tolerates any H revision and refuses the rest.
+    assert status_of(check_download(
+        trade([row(classificationCode="S1")]),
+        {**good_plan, "counts": {"2000": 1}, "expected_rows_total": 1},
+    ), "classification") == "fail"
+    # A forced revision only WARNS: what UNSD labels a converted row with is
+    # unmeasured (see the shortcut note in _check_request).
+    forced = {"params_resolved": {**good_plan["params_resolved"],
+                                  "classification": "H5"},
+              "counts": {"2000": 1}, "expected_rows_total": 1}
+    assert status_of(check_download(trade([row()]), forced),
+                     "classification") == "warn"
+    assert status_of(check_download(trade([row(classificationCode="H5")]),
+                                    forced), "classification") == "pass"
+
+    # D2, frequency and type: an equality, because neither is ever a mix.
+    one = {**good_plan, "counts": {"2000": 1}, "expected_rows_total": 1}
+    assert status_of(check_download(trade([row(freqCode="M")]), one),
+                     "frequency") == "fail"
+    assert status_of(check_download(trade([row(typeCode="S")]), one),
+                     "frequency") == "fail"
+
+    # D3, flow: a warning, since mirror_flows already reports what it ignores.
+    assert status_of(check_download(trade([row(flowCode="RX")]), one),
+                     "flow") == "warn"
+
+    # D4, products: a code nobody asked for means the selection did not reach
+    # the API as intended.
+    assert status_of(check_download(trade([row(cmdCode="4407")]), one),
+                     "cmd") == "fail"
+
+    # D5, periods, both ways: one in excess fails, one missing warns.
+    found = _check_periods(trade([row(period="1999")]),
+                          good_plan["params_resolved"])
+    assert [f["status"] for f in found] == ["fail", "warn"], found
+    assert found[0]["extra"] == ["1999"]
+    assert found[1]["missing"] == ["2000", "2001"]
+
+    # ISO3 collision: the same ISO3 under two reporter codes in one period
+    # would count that country twice. FRA 250/251 are disjoint in time, which
+    # is measured on six pairs out of fifteen, not guaranteed.
+    found = _check_iso3(trade([row(reporterCode=250), row(reporterCode=251)]),
+                        good_plan["params_resolved"])
+    assert found[0]["status"] == "warn", found
+    assert "FRA in 2000" in found[0]["detail"]
+
+    # --- G, conservation in the derived files ---
+    # Null stays null, so the sums must be compared on non-null values: these
+    # helpers are checked against a frame that has both.
+    assert _conserved(1e11, 1e11) and _conserved(None, 0.0)
+    assert not _conserved(1e11, 1e11 + 1)
+
+    source = trade([row(flowCode="X", primaryValue=10.0),
+                    row(flowCode="X", primaryValue=5.0, partnerCode=56),
+                    row(flowCode="M", primaryValue=7.0)])
+    mirror_ok = pl.DataFrame({"primaryValue_exp": [10.0, 5.0],
+                              "primaryValue_imp": [7.0]  * 2})
+    # The exporter side adds up; the importer side has been given a row too
+    # many on purpose, as a lost-or-duplicated row would look.
+    found = {f["check"]: f["status"] for f in check_mirror(source, mirror_ok)}
+    assert found == {"mirror_exp": "pass", "mirror_imp": "fail"}, found
+
+    # EU: output == input minus the intra-EU value deleted. The equation the
+    # aggregation makes, checked instead of trusted.
+    eu_source = trade([row(primaryValue=100.0), row(primaryValue=30.0)])
+    eu_result = trade([row(primaryValue=70.0)])
+    assert check_eu(eu_source, eu_result,
+                    {"intra_eu_value": 60.0})[0]["status"] == "pass"
+    assert check_eu(eu_source, eu_result,
+                    {"intra_eu_value": 0.0})[0]["status"] == "fail"
+
+    # And the real aggregation now reports that value, so check_eu can be fed
+    # from it: a count of rows would not have been enough.
+    _, eu_report = aggregate_eu(frame([
+        {"reporterCode": 276, "reporterISO": "DEU", "partnerCode": 56,
+         "partnerISO": "BEL", "period": "2015", "primaryValue": 12.0},
+        {"reporterCode": 276, "reporterISO": "DEU", "partnerCode": 842,
+         "partnerISO": "USA", "period": "2015", "primaryValue": 5.0},
+    ]), members)
+    assert eu_report["intra_eu_value"] == 12.0, eu_report
 
     print("comtrade_polars: checks OK")
 

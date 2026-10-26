@@ -33,7 +33,11 @@ os.environ["POLARS_MAX_THREADS"] = str(snakemake.threads)  # noqa: F821
 import polars as pl  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comtrade_polars import guarded_sum  # noqa: E402
+from comtrade_polars import (  # noqa: E402
+    check_mirror,
+    guarded_sum,
+    raise_on_fail,
+)
 
 logging.basicConfig(
     filename=snakemake.log[0],
@@ -109,6 +113,17 @@ for side, label in (("exp", "exporter"), ("imp", "importer")):
     if column in mirror.columns:
         logging.info("edges with no %s declaration: %d", label,
                      mirror[column].null_count())
+
+# The mirror moves value between columns; it must never lose any. A row
+# silently dropped by the group_by or the full join would leave a file that
+# opens and sums to something plausible. Checked before writing, so a broken
+# mirror is not delivered.
+findings = check_mirror(data, mirror)
+for finding in findings:
+    log = logging.info if finding["status"] == "pass" else logging.warning
+    log("check %-12s %-4s %s", finding["check"], finding["status"],
+        finding["detail"])
+raise_on_fail(findings, "comtrade_mirror")
 
 outputs = {Path(p).suffix.lstrip("."): p for p in snakemake.output}
 if "parquet" in outputs:

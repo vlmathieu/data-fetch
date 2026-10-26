@@ -539,7 +539,7 @@ and of the network, so they still work when the environment does not:
 
 ```zsh
 python workflow/scripts/comtrade_common.py   # hash, packing, areas, refusals
-python workflow/scripts/comtrade_polars.py   # EU aggregation
+python workflow/scripts/comtrade_polars.py   # EU aggregation, download checks
 ```
 
 The first verifies that the hash ignores list order, case and types but not a
@@ -553,11 +553,69 @@ The second checks the EU aggregation on a dataframe written by hand: nulls stay
 null, intra-EU trade is deleted, the UK is in the EU in 2019 and out of it in
 2021, Croatia is out in 2012 and in from 2013, Belgium's historical code is
 folded in, quantities in different units are not added up, and non-members are
-left alone.
+left alone. It then shows each download check a deliberately broken dataset —
+a duplicated declaration, a missing column, a foreign product code, a period
+nobody asked for, a falsified count, an EU sum that does not add up — and
+checks that it is caught.
 
 ```zsh
 python workflow/scripts/build_comtrade_areas.py   # refresh the areas table
 ```
+
+### Checks on the downloaded data
+
+The self-checks above run on dataframes written by hand. These run on the real
+response, on every download, and they exist for a failure the self-checks
+cannot see: a file that is **plausible but wrong**. It opens, the types are
+right, the row count looks reasonable, and nobody notices until it is
+published.
+
+They run **before the pseudo-country filter and before anything is written**.
+So a dataset that fails leaves no file at all: Snakemake deletes the outputs of
+a failed job but keeps its log, which holds the diagnosis.
+
+Eleven checks, in `workflow/scripts/comtrade_polars.py` so that each one can be
+shown a deliberately broken dataset and proved to detect it. A check that has
+only ever seen a good file proves nothing.
+
+| Check | What it refuses |
+|---|---|
+| `schema` | a column the rest of the pipeline reads is missing |
+| `counts_period` | a period holds fewer rows than the free preflight counted |
+| `counts_total` | the total differs from `expected_rows_total` |
+| `classification` | something other than the classification asked for |
+| `frequency` | another frequency, or services instead of goods |
+| `flow` | a flow direction nobody asked for |
+| `cmd` | a product code nobody asked for |
+| `periods_extra` | a period nobody asked for |
+| `periods_missing` | a period asked for and absent |
+| `iso3_unique` | one ISO3 under two reporter codes in one period |
+| `duplicates` | the same declaration received twice |
+
+Plus one per derived file: the mirror and the EU aggregate must **conserve
+value**. The EU file in particular states its arithmetic out loud — raw total
+minus the intra-EU trade it deleted — and refuses to be written if the two
+sides differ.
+
+Each result lands in the sidecar under `checks`, so a run can be audited
+without reading the log.
+
+**`fail` versus `warn`.** A `fail` stops the run: the file would answer a
+different question from the one asked. A `warn` is recorded and the run
+continues, and two of them are warnings on purpose:
+
+- **the counts.** Comtrade rewrites history, so a gap between the preflight and
+  the download can be a perfectly legitimate revision rather than a bug.
+  Telling the two apart needs re-reading `datasetChecksum` after the download,
+  which is not done yet. Blocking a workflow on a revision would be worse than
+  warning about it. When a count warning appears, the sidecar's
+  `datasetChecksum` is what settles it.
+- **a forced classification.** Asking `HS` and getting a mix of `H0`, `H1` and
+  `H2` is normal — `HS` means "the revision in force that year", and each
+  declarant has its own. Asking `H5` and getting something else may or may not
+  be normal: whether UNSD labels a converted row with the target revision or
+  the source one has not been measured, and the public preview cannot settle it.
+  So it warns rather than refusing a run that might be correct.
 
 ## Open jobs
 
@@ -569,19 +627,16 @@ python workflow/scripts/build_comtrade_areas.py   # refresh the areas table
   rewriting submit / check / download by hand.
 - **other sources**: World Bank, FAOSTAT. Same contract: free preflight, dated
   file, sidecar.
-- **download checks**: reconcile what came back with what was planned. Part of
-  this exists. `comtrade_download.py` fails hard at the ceiling, warns on a
-  pack that returns zero rows, and warns when a requested period is absent
-  from the result. The reconciliation itself does not: the plan holds a free
-  count for every period and nothing compares it to the rows received, the
-  total is never checked against `expected_rows_total`, and the requested
-  codes, flows and reporters are never checked for presence. Two cautions for
-  whoever picks this up. `totalRecords` from the availability endpoint counts
-  the whole reporter-period dataset, not our commodity selection, so it is not
-  a valid baseline; the preview counts are. And a gap is not automatically a
-  bug, because Comtrade can revise upstream between the preflight and the
-  download. That is what `datasetChecksum` is recorded for, so re-reading it
-  after the download would tell a revision apart from a lost pack.
+- **tell a Comtrade revision from a bug**: what is left of the download
+  checks, which otherwise landed (see Check above). The counts can only
+  **warn** today, because a gap between the preflight and the download is a
+  legitimate revision as often as it is a lost pack. Re-reading
+  `datasetChecksum` after the download would separate the two: checksum moved
+  means revision, checksum unchanged with a different count means a bug here,
+  and the warning could become a refusal. It costs a few free calls. One
+  caution for whoever picks it up: `totalRecords` from the availability
+  endpoint counts the whole reporter-period dataset, not our commodity
+  selection, so it is not a valid baseline — the preview counts are.
 - **compare with `comtradr`**:
   [comtradr](https://docs.ropensci.org/comtradr/index.html) (rOpenSci) wraps
   the same API in R, with `ct_get_data()`, `ct_commodity_lookup()`,

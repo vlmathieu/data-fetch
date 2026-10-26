@@ -39,7 +39,12 @@ os.environ["POLARS_MAX_THREADS"] = str(snakemake.threads)  # noqa: F821
 import polars as pl  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comtrade_polars import aggregate_eu, eu_membership  # noqa: E402
+from comtrade_polars import (  # noqa: E402
+    aggregate_eu,
+    check_eu,
+    eu_membership,
+    raise_on_fail,
+)
 
 logging.basicConfig(
     filename=snakemake.log[0],
@@ -83,6 +88,16 @@ if not report["rows_touching_eu"]:
         "no row touches the EU node: no member state in this selection, or "
         "none within its membership years"
     )
+
+# The one arithmetic statement this rule makes: output == input minus the
+# intra-EU value deliberately deleted. Verified by hand on 2026-10-25; a
+# check by hand is not a check, so it runs on every build now, before writing.
+findings = check_eu(data, result, report)
+for finding in findings:
+    log = logging.info if finding["status"] == "pass" else logging.warning
+    log("check %-14s %-4s %s", finding["check"], finding["status"],
+        finding["detail"])
+raise_on_fail(findings, "comtrade_eu")
 
 outputs = {Path(p).suffix.lstrip("."): p for p in snakemake.output}
 if "parquet" in outputs:

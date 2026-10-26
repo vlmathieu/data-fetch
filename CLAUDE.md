@@ -9,8 +9,8 @@ it says what the repo does and why. This file says how to work in it.
 |---|---|
 | `comtrade_preflight` | **verified end to end** against the real API |
 | `comtrade_download` | **verified end to end** on 2026-10-25, free key, 1 call |
-| `comtrade_mirror` | **verified end to end** on the same run |
-| `comtrade_eu` | **verified end to end** on 2026-10-25, 0 API calls |
+| `comtrade_mirror` | **verified end to end**, re-run 2026-10-26 with its check |
+| `comtrade_eu` | **verified end to end**, re-run 2026-10-26, 0 API calls |
 
 Everything above ran under Snakemake **8.25.5**. The preflight was also
 verified under **9.23.1**, with an identical plan; the other three have not
@@ -28,7 +28,7 @@ at least copy its dtypes.
 
 ```zsh
 python workflow/scripts/comtrade_common.py        # hash, packing, areas, refusals
-python workflow/scripts/comtrade_polars.py        # EU aggregation
+python workflow/scripts/comtrade_polars.py        # EU aggregation, download checks
 python workflow/scripts/build_comtrade_areas.py   # refresh resources/, public, no key
 snakemake preflight --sdm conda --cores 1         # free, no key
 snakemake --sdm conda --cores 1                   # full download (premium quota)
@@ -87,8 +87,17 @@ contract is at the top of `rules/common.smk`.
   the areas table (`_load_areas()`, `resolve_areas()`, `pseudo_codes()`, stdlib
   `json` only).
 - `comtrade_polars.py` is imported **by the scripts only**, inside the conda
-  env, so polars is allowed. It holds `guarded_sum()` (shared with the mirror)
-  and the EU aggregation (`eu_membership()`, `aggregate_eu()`).
+  env, so polars is allowed. It holds `guarded_sum()` (shared with the mirror),
+  the EU aggregation (`eu_membership()`, `aggregate_eu()`), and the download
+  checks (`check_download()`, `check_mirror()`, `check_eu()`,
+  `raise_on_fail()`, with `ROW_KEYS`, `REQUIRED` and `TOLERANCE`).
+
+The checks live there and not in the scripts for the same reason as everything
+else: a `script:` file cannot be imported, so a check written in one can never
+be shown a broken dataset to prove it detects anything. Each one is given a
+deliberately corrupted frame in `_demo()`. Verified on 2026-10-26 that all
+seven failure paths also fire on the real downloaded file, not only on the
+fixtures.
 
 `aggregate_eu.py` is only the Snakemake wiring: the logic lives in
 `comtrade_polars.py` because a `script:` file cannot be run on its own, and
@@ -198,6 +207,30 @@ All found by running things, not by rereading them.
   API *response*, which is unfiltered, so counting unfiltered is the
   conservative choice. Consequence: `expected_rows_total` is an upper bound of
   the sidecar's `rows`, and should be compared to `rows_received` instead.
+- **`check_download()` must run BEFORE `drop_pseudo()`**, and that ordering is
+  the whole reason the call sits where it does in `comtrade_download.py`.
+  Because the preflight counts are pre-filter (above), comparing them after the
+  filter reports a deficit on every period of a perfectly healthy run:
+  measured at -326, -327, -323 and -328 on the four periods of the 2026-10-26
+  run, which is exactly `exclude_pseudo`. Moving the call down would make every
+  good run warn. The checks also run before any write, so a failing dataset
+  leaves no file: Snakemake deletes a failed job's `output:` but keeps its
+  `log:`.
+- **`classification: HS` delivers H0..H6 MIXED, within one period.** `HS` means
+  "the revision in force that year", and each declarant has its own. Measured
+  2026-10-26 on 2000-2003: H1 8,864 rows, H2 6,333, H0 433, and 2002 alone
+  holds all three. So the classification check cannot be an equality when `HS`
+  is asked — it accepts any `H<digit>` and refuses an `S1` or a `BEC`. For a
+  forced revision it only **warns**, because what UNSD labels a converted row
+  with is unmeasured and the public preview cannot settle it: asked on
+  2026-10-26, `clCode=H2` returns `{"error":"Something went wrong"}` and `H3`
+  returns 0 rows, while `HS` on the same call shape returns 500. Promote that
+  branch to `fail` only after seeing a real forced-revision download.
+- **The conservation tolerance is `1e-12` relative, not `1e-9`.** On a total of
+  6.7e10 a `1e-9` tolerance leaves 67 units of slack, enough to hide a whole
+  lost row, while the accumulation error of summing ~16,000 f64 values is
+  around 1e-3. The self-check caught this, which is why the number is what it
+  is. Do not loosen it to silence a failure.
 - **`comtrade_common.py` must stay cheap to import**: the Snakefile imports it
   before any rule. No polars, no comtradeapicall in there.
 - **The row ceiling is the key's, not the package's.** `records_per_call` in
@@ -308,6 +341,27 @@ First real download, 2026-10-25, free key, hash 947dc53d:
     the 93 netWgt zeros come from the source, not from the sums
 ```
 
+Second download of the same request, 2026-10-26, free key, hash `947dc53d`.
+The whole point of repeating it is that the counts reproduced:
+
+```
+2000-2003, code 4403, M+X, all reporters   4 free counting calls, 1 keyed call
+  per year: 4,219 | 4,182 | 4,211 | 4,322   identical to 2026-10-25
+  expected 16,934  ->  RECEIVED 16,934      exact, again
+  exclude_pseudo: 16,934 -> 15,630, i.e. -326 / -327 / -323 / -328 per period
+  47 columns; classificationCode = H1 8,864 | H2 6,333 | H0 433
+  0 duplicate declaration on ROW_KEYS, and every subset down to 5 columns was
+    still unique -> the key is wide enough not to false-alarm
+  0 null on period, reporterCode, partnerCode, partner2Code, cmdCode,
+    flowCode, classificationCode, freqCode, typeCode
+  0 negative value anywhere; primaryValue never null, min 1.0
+  mirror: 10,996 edges, exporter 27,253,921,759.06 + importer
+    39,921,501,667.52 = 67,175,423,426.58, the source total. Both conserved.
+  eu: 15,630 -> 10,671, 1,128 intra-EU deleted, 2,033 touching the EU node
+    67,175,423,426.59 - 6,946,311,657.02 = 60,229,111,769.57, gap 0.00,
+    reproducing the figures measured by hand on 2026-10-25
+```
+
 Orders of magnitude, all reporters, M+X:
 
 ```
@@ -336,14 +390,15 @@ sidecar's `datasetChecksum` settles it.
 - **`mapping`**: `hs_revision: auto` and HS to FAO. Needs a correspondence
   table per revision. In `strict`, a code absent from a revision returns zero
   rows and produces a warning, nothing more.
-- **download checks**: the plan's per-period counts are never compared to the
-  rows received, nor the total to `expected_rows_total`. Only the ceiling,
-  empty packs and absent periods are caught today, plus the ISO3 double-count
-  warning added on 2026-10-25. The availability `totalRecords` is not a usable
-  baseline (whole reporter-period, not our codes); the preview counts are. See
-  README for the full note. **Compare against the sidecar's `rows_received`,
-  not `rows`**: the latter is post-`exclude_pseudo`, so it is legitimately
-  lower than the plan.
+- **tell a Comtrade revision from a bug**: all that is left of the download
+  checks, which landed on 2026-10-26. The count checks can only **warn**,
+  because a gap between the preflight and the download is a legitimate
+  revision as often as it is a lost pack. Re-reading `datasetChecksum` after
+  the download separates them — checksum moved means revision, checksum
+  unchanged with a different count means a bug here — and the warning could
+  then become a refusal. A few free calls. The availability `totalRecords` is
+  NOT a usable baseline (whole reporter-period, not our codes); the preview
+  counts are.
 - **compare with `comtradr`**: the R wrapper over the same API
   (https://docs.ropensci.org/comtradr/). Its docs state a maximum interval of
   twelve years per request. If that holds for `data/v1/get`, `pack_periods()`
