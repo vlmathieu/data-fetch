@@ -30,14 +30,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comtrade_common import (  # noqa: E402
     call,
     caps,
+    compare_vintage,
     params_hash,
     pseudo_codes,
+    raise_on_fail,
+    revision_finding,
     selection,
+    vintage,
 )
 from comtrade_polars import (  # noqa: E402
+    check_csv,
     check_download,
     drop_pseudo,
-    raise_on_fail,
 )
 
 logging.basicConfig(
@@ -171,6 +175,29 @@ for finding in findings:
         finding["detail"])
 # Anything not passing also goes in `warnings`, so that what already read that
 # field loses nothing to the move.
+
+# A count gap is ambiguous on its own: Comtrade revises upstream as often as we
+# get something wrong. The checksum tells them apart, so it is re-read HERE --
+# and only when there is a gap to explain. Free, public calls; a healthy run
+# spends none of them, because silence is cheaper still.
+gap = any(f["check"].startswith("counts_") and f["status"] != "pass"
+          for f in findings)
+comparison = None
+if gap:
+    logging.info("counts differ: re-reading the vintage to tell a Comtrade "
+                 "revision from a bug here")
+    try:
+        after, status = vintage(params, params["period"], comtradeapicall)
+        comparison = (compare_vintage(plan["vintage"], after)
+                      if status == "complete" else None)
+    except RuntimeError as exc:
+        logging.warning("vintage could not be re-read: %s", exc)
+verdict = revision_finding(gap, comparison)
+findings.append(verdict)
+if gap:
+    logging.warning("check %-16s %-4s %s", verdict["check"],
+                    verdict["status"], verdict["detail"])
+
 warnings += [f"{f['check']}: {f['detail']}"
              for f in findings if f["status"] != "pass"]
 raise_on_fail(findings, "comtrade_download")
@@ -218,6 +245,12 @@ if "csv" in outputs:
     # other hand, are lost when the CSV is READ BACK: the pipeline never reads
     # this file, the parquet is the canonical artifact.
     data.write_csv(outputs["csv"], separator=snakemake.params["csv_sep"])
+    csv_findings = check_csv(outputs["csv"], data, snakemake.params["csv_sep"])
+    for f in csv_findings:
+        log = logging.info if f["status"] == "pass" else logging.warning
+        log("check %-16s %-4s %s", f["check"], f["status"], f["detail"])
+    findings += csv_findings
+    raise_on_fail(csv_findings, "comtrade_download")
 
 if not params["include_desc"]:
     # Without the labels in the data, the reference tables have to be delivered

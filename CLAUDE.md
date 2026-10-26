@@ -7,7 +7,7 @@ it says what the repo does and why. This file says how to work in it.
 
 | Rule | State |
 |---|---|
-| `comtrade_preflight` | **verified end to end** against the real API |
+| `comtrade_preflight` | **verified end to end** against the real API, checks its own plan |
 | `comtrade_download` | **verified end to end** on 2026-10-25, free key, 1 call |
 | `comtrade_mirror` | **verified end to end**, re-run 2026-10-26 with its check |
 | `comtrade_eu` | **verified end to end**, re-run 2026-10-26, 0 API calls |
@@ -27,7 +27,7 @@ at least copy its dtypes.
 ## Commands
 
 ```zsh
-python workflow/scripts/comtrade_common.py        # hash, packing, areas, refusals
+python workflow/scripts/comtrade_common.py        # hash, packing, areas, refusals, plan checks
 python workflow/scripts/comtrade_polars.py        # EU aggregation, download checks
 python workflow/scripts/build_comtrade_areas.py   # refresh resources/, public, no key
 snakemake preflight --sdm conda --cores 1         # free, no key
@@ -80,7 +80,13 @@ contract is at the top of `rules/common.smk`.
 **Two shared modules, and the split matters:**
 
 - `comtrade_common.py` is imported **by the Snakefile**, before any rule. It
-  must stay free of polars, pandas and network access. It holds the ceilings
+  must stay free of polars, pandas and network access. It also owns the
+  **check protocol** (`finding()`, `raise_on_fail()`), the **plan checks**
+  (`check_packing()`, free, at preflight time) and the **vintage**
+  (`vintage()`, `compare_vintage()`, `revision_finding()`). All stdlib: a dict
+  check has no business importing polars, and `comtrade_preflight` does not
+  import it. `vintage()` takes the `comtradeapicall` module as an ARGUMENT,
+  the same injection `call()` uses, so this module still imports neither. It holds the ceilings
   (`caps()`, `FREE_RECORDS_PER_CALL`, `PREMIUM_RECORDS_PER_CALL`,
   `WARN_FRACTION`), the `FIXED` constants, parameter resolution and hashing,
   the `call()` wrapper, `selection()`, `pack_periods()`, `bisect_codes()`, and
@@ -88,9 +94,9 @@ contract is at the top of `rules/common.smk`.
   `json` only).
 - `comtrade_polars.py` is imported **by the scripts only**, inside the conda
   env, so polars is allowed. It holds `guarded_sum()` (shared with the mirror),
-  the EU aggregation (`eu_membership()`, `aggregate_eu()`), and the download
-  checks (`check_download()`, `check_mirror()`, `check_eu()`,
-  `raise_on_fail()`, with `ROW_KEYS`, `REQUIRED` and `TOLERANCE`).
+  the EU aggregation (`eu_membership()`, `aggregate_eu()`), and the checks that
+  need a dataframe (`check_download()`, `check_mirror()`, `check_eu()`,
+  `check_csv()`, with `ROW_KEYS`, `REQUIRED`, `AREA_SIDES` and `TOLERANCE`).
 
 The checks live there and not in the scripts for the same reason as everything
 else: a `script:` file cannot be imported, so a check written in one can never
@@ -207,6 +213,15 @@ All found by running things, not by rereading them.
   API *response*, which is unfiltered, so counting unfiltered is the
   conservative choice. Consequence: `expected_rows_total` is an upper bound of
   the sidecar's `rows`, and should be compared to `rows_received` instead.
+- **The plan is checked at PREFLIGHT time, for free, and that is the point.**
+  `check_packing()` runs before `plan.json` is written, so an incoherent plan
+  never reaches the disk and no rule can consume it. Its `packing_coverage`
+  invariant — every requested (period, product) pair asked for exactly once —
+  stands in for four failures, and the one that earns it is two overlapping
+  code subsets out of `bisect_codes`: that **is** caught downstream by
+  `duplicates`, but only after the quota is gone. Do not move these checks
+  into the download "where the data is": the whole value is that they fire
+  before the first keyed call.
 - **`check_download()` must run BEFORE `drop_pseudo()`**, and that ordering is
   the whole reason the call sits where it does in `comtrade_download.py`.
   Because the preflight counts are pre-filter (above), comparing them after the
@@ -226,6 +241,24 @@ All found by running things, not by rereading them.
   2026-10-26, `clCode=H2` returns `{"error":"Something went wrong"}` and `H3`
   returns 0 rows, while `HS` on the same call shape returns 500. Promote that
   branch to `fail` only after seeing a real forced-revision download.
+- **A code is not a country just because it came back.** The areas table is
+  versioned on purpose, so it drifts, and an area UNSD adds later sits in
+  NEITHER set: not in `pseudo_codes()`, so `exclude_pseudo` keeps it, and not
+  in the table, so nothing classifies it. `known_areas` is the only thing that
+  would say so, and it **warns** rather than failing: a stale `resources/` is
+  not a corrupt download. `AREA_SIDES` includes `partner2Code` while
+  `PSEUDO_SIDES` deliberately does not — there its `0` is a "not applicable"
+  placeholder that means World, here `0` is simply a known code and cannot
+  false-alarm. Do not "harmonize" the two tuples.
+- **The counts warn; `revision` decides.** The vintage is re-read after the
+  download **only when a count check gapped**, and then: checksums moved ->
+  `warn`, the gap is explained by a Comtrade revision; checksums identical ->
+  **`fail`**, same data upstream and a different row count here, so the bug is
+  ours. Free public calls, and a healthy run spends none. The `fail` branch
+  rests on the preflight/download equality measured twice (16,934 = 16,934, on
+  2026-10-25 and 2026-10-26); its message names the way out (re-run the
+  preflight) on purpose. This matters most on the replay path
+  (`--config run_id=…`), where the plan on disk can be months old.
 - **The conservation tolerance is `1e-12` relative, not `1e-9`.** On a total of
   6.7e10 a `1e-9` tolerance leaves 67 units of slack, enough to hide a whole
   lost row, while the accumulation error of summing ~16,000 f64 values is
@@ -362,6 +395,31 @@ The whole point of repeating it is that the counts reproduced:
     reproducing the figures measured by hand on 2026-10-25
 ```
 
+Plan checks on a real multi-pack plan, 2026-10-26, FREE preflight on the
+default config, hash `ac3dd013`. The point of running it is that the plan a
+single-pack run produces exercises neither the multi-pack path nor
+bisect_codes:
+
+```
+1996-2023, codes 4403/4407/4412   28 free counting calls, 0 keyed
+  539,660 rows expected, 9 packs, every pack identical to the figures above
+  packing_coverage pass: 28 period(s) x 3 code(s) each requested exactly once
+  packing_ceiling  pass: 9 pack(s) all under the 80,000 margin
+  packing_total    pass: 9 pack(s) add up to 539,660
+```
+
+CSV read-back, same day, on the three delivered CSVs:
+
+```
+  .csv         15,630 x 47, 16,529 field(s) containing ','  all intact
+  .mirror.csv  10,996 x 20,    614 field(s)                 all intact
+  .eu.csv      10,671 x 25, 11,442 field(s)                 all intact
+```
+
+That 16,529 is what makes the check non-vacuous: the quoting claim the code
+used to state in prose is now measured. A file with 0 such fields gets a pass
+whose detail says the quoting was never exercised.
+
 Orders of magnitude, all reporters, M+X:
 
 ```
@@ -390,15 +448,6 @@ sidecar's `datasetChecksum` settles it.
 - **`mapping`**: `hs_revision: auto` and HS to FAO. Needs a correspondence
   table per revision. In `strict`, a code absent from a revision returns zero
   rows and produces a warning, nothing more.
-- **tell a Comtrade revision from a bug**: all that is left of the download
-  checks, which landed on 2026-10-26. The count checks can only **warn**,
-  because a gap between the preflight and the download is a legitimate
-  revision as often as it is a lost pack. Re-reading `datasetChecksum` after
-  the download separates them — checksum moved means revision, checksum
-  unchanged with a different count means a bug here — and the warning could
-  then become a refusal. A few free calls. The availability `totalRecords` is
-  NOT a usable baseline (whole reporter-period, not our codes); the preview
-  counts are.
 - **compare with `comtradr`**: the R wrapper over the same API
   (https://docs.ropensci.org/comtradr/). Its docs state a maximum interval of
   twelve years per request. If that holds for `data/v1/get`, `pack_periods()`

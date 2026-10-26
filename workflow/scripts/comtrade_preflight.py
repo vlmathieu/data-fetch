@@ -33,14 +33,15 @@ import comtradeapicall
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from comtrade_common import (  # noqa: E402
-    FIXED,
     bisect_codes,
     call,
     caps,
-    join as _join,
+    check_packing,
     pack_periods,
     params_hash,
+    raise_on_fail,
     selection,
+    vintage,
 )
 
 logging.basicConfig(
@@ -58,35 +59,6 @@ def count_rows(params: dict, period: str, cmd: list[str] | None = None) -> int:
     df = call(fn, label=f"count {period}", countOnly=True,
               **selection(params, period, cmd))
     return int(df["count"].iloc[0])
-
-
-def vintage(params: dict, periods: list[str], chunk: int = 10
-            ) -> tuple[list[dict], str]:
-    """Vintage per (reporter, period): which version of the data we are pulling.
-
-    Comtrade rewrites history. France 2020 was published on 2021-05-26, then
-    revised on 2026-05-23. Without this record, two runs of the same parameters
-    that diverge are inexplicable. `datasetChecksum` is the strongest anchor:
-    unchanged means identical data.
-    """
-    fn = (comtradeapicall._getFinalDataAvailability if params["data_type"] == "final"
-          else comtradeapicall._getTarifflineDataAvailability)
-    keep = ["period", "reporterCode", "reporterISO", "classificationCode",
-            "totalRecords", "datasetChecksum", "firstReleased", "lastReleased"]
-    rows: list[dict] = []
-    for i in range(0, len(periods), chunk):
-        batch = ",".join(periods[i:i + chunk])
-        try:
-            df = call(fn, FIXED["type"], params["freq"],
-                      params["classification"], batch,
-                      _join(params["reporter"]),
-                      attempts=3, label=f"availability {batch}")
-        except RuntimeError as exc:
-            logging.warning("vintage unavailable for %s: %s", batch, exc)
-            return rows, "incomplete"
-        present = [c for c in keep if c in df.columns]
-        rows.extend(df[present].astype(str).to_dict("records"))
-    return rows, "complete"
 
 
 def build_plan(params: dict) -> dict:
@@ -129,7 +101,7 @@ def build_plan(params: dict) -> dict:
             packs.append({"periods": pack, "cmd": None,
                           "expected_rows": expected})
 
-    rows, status = vintage(params, periods)
+    rows, status = vintage(params, periods, comtradeapicall)
 
     return {
         "params_resolved": params,
@@ -148,6 +120,20 @@ def build_plan(params: dict) -> dict:
 
 
 plan = build_plan(snakemake.params["params"])
+
+# Checks on the plan BEFORE it is written. Everything here cost free calls, so
+# this is the one place in the repo where a problem can be caught without
+# having spent a thing. An incoherent plan never reaches the disk, so no rule
+# downstream can consume it and no quota is burnt on it.
+findings = check_packing(plan)
+for f in findings:
+    log = logging.info if f["status"] == "pass" else logging.warning
+    log("check %-18s %-4s %s", f["check"], f["status"], f["detail"])
+plan["checks"] = {f["check"]: {k: v for k, v in f.items() if k != "check"}
+                  for f in findings}
+plan["warnings"] += [f"{f['check']}: {f['detail']}"
+                     for f in findings if f["status"] != "pass"]
+raise_on_fail(findings, "comtrade_preflight")
 
 logging.info(
     "plan: %d period(s), %d expected row(s), %d download call(s) "

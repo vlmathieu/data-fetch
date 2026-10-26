@@ -39,11 +39,12 @@ os.environ["POLARS_MAX_THREADS"] = str(snakemake.threads)  # noqa: F821
 import polars as pl  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from comtrade_common import raise_on_fail  # noqa: E402
 from comtrade_polars import (  # noqa: E402
     aggregate_eu,
+    check_csv,
     check_eu,
     eu_membership,
-    raise_on_fail,
 )
 
 logging.basicConfig(
@@ -104,4 +105,12 @@ if "parquet" in outputs:
     result.write_parquet(outputs["parquet"], compression="zstd")
 if "csv" in outputs:
     result.write_csv(outputs["csv"], separator=snakemake.params["csv_sep"])
+    # The CSV is what colleagues open in Stata or R, so it is read back and
+    # compared rather than assumed. See comtrade_polars.check_csv.
+    csv_findings = check_csv(outputs["csv"], result,
+                             snakemake.params["csv_sep"])
+    for f in csv_findings:
+        log = logging.info if f["status"] == "pass" else logging.warning
+        log("check %-16s %-4s %s", f["check"], f["status"], f["detail"])
+    raise_on_fail(csv_findings, "comtrade_eu")
 logging.info("written: %s", list(outputs.values()))

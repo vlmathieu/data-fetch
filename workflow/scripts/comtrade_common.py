@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -165,6 +166,26 @@ def pseudo_codes() -> frozenset[str]:
     by_code, _ = _load_areas()
     return frozenset(code for code, area in by_code.items()
                      if area["kind"] in PSEUDO_KINDS)
+
+
+def area_codes() -> frozenset[str]:
+    """Every area code the table knows, as strings.
+
+    The counterpart of pseudo_codes(), and the reason it exists: the table is
+    VERSIONED on purpose, so it drifts. An area UNSD added after the last
+    build_comtrade_areas.py run is in neither set -- not in pseudo_codes(), so
+    exclude_pseudo leaves it in, and not in the table, so nothing knows what it
+    is. It ends up treated as a country without a word. Comparing the delivered
+    codes against this set is what makes that drift visible.
+
+    Returns
+    -------
+    frozenset of str
+        All 312 codes of resources/comtrade_areas.json, countries, proxies,
+        aggregates and territories alike.
+    """
+    by_code, _ = _load_areas()
+    return frozenset(by_code)
 
 
 def resolve_areas(values, label: str) -> list[str] | None:
@@ -787,6 +808,440 @@ def bisect_codes(codes: list[str], count_fn, limit: int
             + bisect_codes(codes[middle:], count_fn, limit))
 
 
+# --- findings: the shared protocol of every check ---------------------------
+# One vocabulary for the whole repo, and it lives HERE rather than in
+# comtrade_polars because the checks on the plan are stdlib-only: a dict check
+# has no business importing polars, and comtrade_preflight does not import it.
+#
+# Every check returns findings instead of raising, so that ONE run reports
+# everything that is off rather than stopping at the first problem. The caller
+# logs them, then calls raise_on_fail().
+
+def finding(check: str, status: str, detail: str, **extra) -> dict:
+    """One check result.
+
+    Parameters
+    ----------
+    check : str
+        Short name, used as the key in the sidecar's 'checks' block.
+    status : {'pass', 'warn', 'fail'}
+        'fail' stops the run before anything is written; 'warn' is recorded
+        and the run continues.
+    detail : str
+        One line, readable in a log without any other context.
+    **extra
+        Numbers worth keeping in the sidecar ('expected', 'received'...).
+
+    Returns
+    -------
+    dict
+        {'check', 'status', 'detail', ...extra}.
+    """
+    return {"check": check, "status": status, "detail": detail, **extra}
+
+
+def raise_on_fail(findings: list[dict], label: str) -> None:
+    """Raises if any finding failed, naming every one of them.
+
+    Called BEFORE any file is written, so a non-conforming dataset is never
+    delivered. Snakemake deletes the `output:` of a failed job but keeps its
+    `log:`, so the diagnosis survives the failure.
+
+    Parameters
+    ----------
+    findings : list of dict
+        Output of check_download, check_mirror or check_eu.
+    label : str
+        What was checked, for the first line of the message.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    RuntimeError
+        At least one finding has status 'fail'. The message lists them all,
+        not just the first.
+    """
+    failed = [f for f in findings if f["status"] == "fail"]
+    if failed:
+        lines = "\n".join(f"  - {f['check']}: {f['detail']}" for f in failed)
+        raise RuntimeError(
+            f"{label}: {len(failed)} check(s) failed, nothing written.\n"
+            f"{lines}"
+        )
+
+
+# --- vintage: which version of the data are we pulling? ----------------------
+
+VINTAGE_KEEP = ("period", "reporterCode", "reporterISO", "classificationCode",
+                "totalRecords", "datasetChecksum", "firstReleased",
+                "lastReleased")
+
+
+def vintage(params: dict, periods: list[str], api, chunk: int = 10
+            ) -> tuple[list[dict], str]:
+    """Vintage per (reporter, period): which version of data we are pulling.
+
+    Comtrade rewrites history. France 2020 was published on 2021-05-26, then
+    revised on 2026-05-23. Without this record, two runs of the same parameters
+    that diverge are inexplicable. `datasetChecksum` is the strongest anchor:
+    unchanged means identical data.
+
+    Lives here rather than in the preflight script because BOTH rules need it
+    -- the preflight to record it, the download to compare against it -- and
+    because a `script:` file cannot be imported, so nothing in one is testable.
+
+    Parameters
+    ----------
+    params : dict
+        Resolved request, read for 'data_type', 'freq', 'classification' and
+        'reporter'.
+    periods : list of str
+        Periods to ask about.
+    api : module
+        The comtradeapicall module. INJECTED, never imported here: this module
+        is loaded by the Snakefile before any rule and must stay cheap. Same
+        pattern as call() taking the function to call.
+    chunk : int, optional
+        Periods per availability call, 10 by default.
+
+    Returns
+    -------
+    (rows, status) : tuple
+        rows : list of dict
+            One record per (reporter, period), values as strings, holding
+            VINTAGE_KEEP's columns that the endpoint actually returned.
+        status : {'complete', 'incomplete'}
+            'incomplete' as soon as one batch could not be read; the rows
+            gathered so far are still returned.
+    """
+    fn = (api._getFinalDataAvailability if params["data_type"] == "final"
+          else api._getTarifflineDataAvailability)
+    rows: list[dict] = []
+    for i in range(0, len(periods), chunk):
+        batch = ",".join(periods[i:i + chunk])
+        try:
+            # typeCode comes FIRST in this signature; forgetting it only
+            # raises at runtime.
+            df = call(fn, FIXED["type"], params["freq"],
+                      params["classification"], batch,
+                      join(params["reporter"]),
+                      attempts=3, label=f"availability {batch}")
+        except RuntimeError as exc:
+            logging.warning("vintage unavailable for %s: %s", batch, exc)
+            return rows, "incomplete"
+        present = [c for c in VINTAGE_KEEP if c in df.columns]
+        rows.extend(df[present].astype(str).to_dict("records"))
+    return rows, "complete"
+
+
+def _vintage_index(rows: list[dict]) -> dict[tuple[str, str], str]:
+    """Indexes vintage rows by (period, reporterCode) -> datasetChecksum.
+
+    That key is unique: measured on the plan of 2026-10-26, 681 rows for 681
+    distinct keys and 681 distinct checksums.
+    """
+    return {(row["period"], row["reporterCode"]): row.get("datasetChecksum")
+            for row in rows}
+
+
+def compare_vintage(before: list[dict], after: list[dict]) -> dict:
+    """Did Comtrade revise the data between the preflight and the download?
+
+    This is what makes a row-count gap conclusive instead of ambiguous. The
+    counts can only ever warn on their own, because a gap is as often a
+    legitimate upstream revision as a bug here; the checksum tells the two
+    apart.
+
+    Parameters
+    ----------
+    before : list of dict
+        plan['vintage'], as recorded by the preflight.
+    after : list of dict
+        The same query re-run after the download. Free, public endpoint.
+
+    Returns
+    -------
+    dict
+        'changed'   : list of (period, reporterCode) whose checksum moved,
+        'appeared'  : keys present only after,
+        'vanished'  : keys present only before,
+        'unchanged' : how many keys matched,
+        'revised'   : bool, true if anything at all moved.
+    """
+    old, new = _vintage_index(before), _vintage_index(after)
+    shared = set(old) & set(new)
+    changed = sorted(k for k in shared if old[k] != new[k])
+    return {
+        "changed": changed,
+        "appeared": sorted(set(new) - set(old)),
+        "vanished": sorted(set(old) - set(new)),
+        "unchanged": len(shared) - len(changed),
+        "revised": bool(changed or set(new) ^ set(old)),
+    }
+
+
+def revision_finding(gap: bool, comparison: dict | None) -> dict:
+    """Turns a vintage comparison into the verdict on a row-count gap.
+
+    Parameters
+    ----------
+    gap : bool
+        Whether a count check reported a difference. With no gap there is
+        nothing to explain.
+    comparison : dict or None
+        Output of compare_vintage, or None when the vintage could not be
+        re-read.
+
+    Returns
+    -------
+    dict
+        One finding named 'revision':
+          - no gap                      -> 'pass', nothing was re-read
+          - gap and the vintage moved   -> 'warn', the gap is EXPLAINED
+          - gap and the vintage is identical -> 'fail', the bug is OURS
+          - gap and the vintage unknown -> 'warn', cannot tell, and saying so
+            is more honest than picking a side
+    """
+    if not gap:
+        return finding("revision", "pass",
+                       "counts match, so the vintage was not re-read")
+    if comparison is None:
+        return finding("revision", "warn",
+                       "counts differ and the vintage could not be re-read, "
+                       "so a revision cannot be told apart from a bug")
+    if comparison["revised"]:
+        return finding(
+            "revision", "warn",
+            f"counts differ AND the vintage moved "
+            f"({len(comparison['changed'])} checksum(s) changed, "
+            f"{len(comparison['appeared'])} appeared, "
+            f"{len(comparison['vanished'])} vanished): Comtrade revised "
+            f"between the preflight and the download, which explains the gap.",
+            **comparison)
+    return finding(
+        "revision", "fail",
+        f"counts differ while the vintage is IDENTICAL "
+        f"({comparison['unchanged']} checksum(s) unchanged): same data "
+        f"upstream, different number of rows here, so the bug is on our side. "
+        f"Re-run the preflight to get fresh counts if you believe otherwise.",
+        **comparison)
+
+
+# --- checks on the plan ------------------------------------------------------
+# Everything below is stdlib and runs at PREFLIGHT time, on free calls only.
+# That matters: every other check in this repo runs after the keyed call, so a
+# plan that was already wrong had cost quota by the time anything noticed. The
+# strangest asymmetry the repo had was that comtrade_preflight is the one rule
+# safe to run freely, and the one rule whose output nothing verified.
+
+
+def check_packing(plan: dict) -> list[dict]:
+    """Checks a download plan against the request it claims to serve.
+
+    Called by comtrade_preflight BEFORE plan.json is written, so an incoherent
+    plan is never put on disk and nothing downstream can consume it.
+
+    Parameters
+    ----------
+    plan : dict
+        The plan as build_plan() assembles it: 'params_resolved', 'counts',
+        'expected_rows_total', 'packs' and 'thresholds'.
+
+    Returns
+    -------
+    list of dict
+        Findings 'packing_coverage', 'packing_ceiling' and 'packing_total'.
+    """
+    params = plan["params_resolved"]
+    packs = plan["packs"]
+    return (_check_coverage(params, plan["counts"], packs)
+            + _check_pack_ceiling(packs, plan["thresholds"])
+            + _check_pack_total(packs, plan["expected_rows_total"]))
+
+
+def _check_coverage(params: dict, counts: dict, packs: list[dict]
+                    ) -> list[dict]:
+    """Every requested (period, code) pair must be asked for exactly once.
+
+    One invariant standing in for four failures, which is why it is worth more
+    than the rest of this module put together:
+
+      - a period missing from the packs is never downloaded;
+      - a period in two packs is downloaded twice;
+      - a code lost by bisect_codes disappears from the result;
+      - two code subsets that overlap duplicate every row they share.
+
+    That last one is the payoff. A code overlap IS caught today, by the
+    `duplicates` check on the delivered file -- but only after the quota has
+    been spent and with a file to throw away. Here it costs nothing and fires
+    before anything goes out.
+
+    Parameters
+    ----------
+    params : dict
+        plan['params_resolved'], read for 'period' and 'cmd'.
+    counts : dict of {str: int}
+        plan['counts'], one free count per period.
+    packs : list of dict
+        plan['packs']; a pack's 'cmd' of None means every requested code.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'fail' listing what is uncovered or covered twice.
+    """
+    asked_periods = list(params["period"])
+    asked_cmd = list(params["cmd"])
+    problems: list[str] = []
+
+    # The counts drive the packing, so they must describe exactly the request.
+    # Same invariant seen from the other end, and cheaper to state here than to
+    # debug in a pack list.
+    if set(counts) != set(asked_periods):
+        missing = sorted(set(asked_periods) - set(counts))
+        extra = sorted(set(counts) - set(asked_periods))
+        problems.append(f"counts cover the wrong periods "
+                        f"(missing {missing}, unexpected {extra})")
+
+    for period in asked_periods:
+        # cmd None means "every requested code", which is the normal path.
+        requested: list[str] = []
+        for pack in packs:
+            if period in pack["periods"]:
+                requested += list(pack["cmd"]) if pack["cmd"] else asked_cmd
+
+        seen = set(requested)
+        duplicated = sorted({c for c in requested if requested.count(c) > 1})
+        uncovered = sorted(set(asked_cmd) - seen)
+        unexpected = sorted(seen - set(asked_cmd))
+
+        if duplicated:
+            problems.append(f"{period}: code(s) requested more than once: "
+                            f"{duplicated[:10]}")
+        if uncovered:
+            problems.append(f"{period}: code(s) in no pack: {uncovered[:10]}")
+        if unexpected:
+            problems.append(f"{period}: code(s) nobody asked for: "
+                            f"{unexpected[:10]}")
+
+    if problems:
+        return [finding(
+            "packing_coverage", "fail",
+            f"{len(problems)} problem(s) in the packing: "
+            + "; ".join(problems[:5]),
+            problems=problems,
+        )]
+    return [finding(
+        "packing_coverage", "pass",
+        f"{len(asked_periods)} period(s) x {len(asked_cmd)} code(s) each "
+        f"requested exactly once, over {len(packs)} pack(s)")]
+
+
+def _check_pack_ceiling(packs: list[dict], thresholds: dict) -> list[dict]:
+    """No pack may be planned over the ceiling it is meant to stay under.
+
+    The packing's own promise. One exception is legitimate and documented: a
+    single period too big on its own is split on the codes, and bisect_codes
+    can hand back a single code that is over the limit and cannot be split any
+    further. Such a pack is IRREDUCIBLE, so it warns rather than failing.
+
+    Parameters
+    ----------
+    packs : list of dict
+        plan['packs'].
+    thresholds : dict
+        plan['thresholds'], with 'warn_rows' and 'fail_rows'.
+
+    Returns
+    -------
+    list of dict
+        One finding. 'fail' when a pack is over the ceiling or over the margin
+        while still reducible, 'warn' for the irreducible exception.
+    """
+    warn_rows, fail_rows = thresholds["warn_rows"], thresholds["fail_rows"]
+    over_ceiling: list[str] = []
+    reducible: list[str] = []
+    irreducible: list[str] = []
+
+    for pack in packs:
+        rows = pack["expected_rows"]
+        periods, cmd = pack["periods"], pack["cmd"]
+        if rows < warn_rows:
+            continue
+        label = (f"{','.join(periods)} / {len(cmd) if cmd else 'all'} "
+                 f"code(s): {rows} rows")
+        if rows >= fail_rows:
+            over_ceiling.append(label)
+        elif len(periods) == 1 and cmd is not None and len(cmd) == 1:
+            irreducible.append(label)
+        else:
+            reducible.append(label)
+
+    if over_ceiling:
+        return [finding(
+            "packing_ceiling", "fail",
+            f"pack(s) planned at or above the {fail_rows} ceiling, so the "
+            f"download WILL come back truncated: {over_ceiling}. Said now, "
+            f"for free, instead of after the call.", packs=over_ceiling)]
+    if reducible:
+        return [finding(
+            "packing_ceiling", "fail",
+            f"pack(s) above the {warn_rows} margin that could still have been "
+            f"split: {reducible}. The packing did not do its job.",
+            packs=reducible)]
+    if irreducible:
+        return [finding(
+            "packing_ceiling", "warn",
+            f"pack(s) above the {warn_rows} margin and irreducible (one "
+            f"period, one code): {irreducible}. Nothing left to split; an "
+            f"upstream revision could push them over the ceiling.",
+            packs=irreducible)]
+    return [finding("packing_ceiling", "pass",
+                    f"{len(packs)} pack(s) all under the {warn_rows} margin")]
+
+
+def _check_pack_total(packs: list[dict], expected_total: int) -> list[dict]:
+    """The packs must add up to the total the counts gave.
+
+    Severity depends on which path built them, and the distinction is not
+    pedantry. On the normal path a pack's expected_rows is pure arithmetic over
+    `counts`, so a mismatch is certainly a bug: 'fail'. On the bisect_codes
+    path each subset was counted by a SEPARATE API call, and the additivity of
+    counts over code subsets has never been measured here, so a small gap is
+    not proof of anything: 'warn'.
+
+    Parameters
+    ----------
+    packs : list of dict
+        plan['packs'].
+    expected_total : int
+        plan['expected_rows_total'], the sum of the per-period counts.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'fail' or 'warn' on a mismatch as described above.
+    """
+    total = sum(pack["expected_rows"] for pack in packs)
+    if total == expected_total:
+        return [finding("packing_total", "pass",
+                        f"{len(packs)} pack(s) add up to {total} rows",
+                        expected=expected_total, planned=total)]
+    bisected = any(pack["cmd"] for pack in packs)
+    return [finding(
+        "packing_total", "warn" if bisected else "fail",
+        f"the packs add up to {total} rows, the counts to {expected_total} "
+        f"({total - expected_total:+d})"
+        + (". The codes were split, so each subset came from its own counting "
+           "call and a small gap is not proof of a bug."
+           if bisected else
+           ". No code split, so this is pure arithmetic over the counts."),
+        expected=expected_total, planned=total)]
+
+
 # --- check ------------------------------------------------------------------
 
 def _demo() -> None:
@@ -997,6 +1452,147 @@ def _demo() -> None:
     refused({**base, "freq": "M"}, ValueError)
     # Needs the correspondence tables of the `mapping` job.
     refused({**base, "hs_revision": "auto"}, NotImplementedError)
+
+    # --- checks on the plan ---
+    # Plans written by hand, because the real plan.json on disk has ONE pack
+    # with cmd: null and therefore exercises neither the multi-pack path nor
+    # bisect_codes. The paths that could hide a bug are exactly the ones a real
+    # plan does not reach, which is why they get asserts of their own.
+    def demo_plan(packs, counts=None, total=None, cmd=("4403", "4407")):
+        """A plan carrying only what check_packing reads."""
+        counts = {"2000": 100, "2001": 200} if counts is None else counts
+        return {
+            "params_resolved": {"period": sorted(counts), "cmd": list(cmd)},
+            "counts": counts,
+            "expected_rows_total": (sum(counts.values()) if total is None
+                                    else total),
+            "packs": packs,
+            "thresholds": {"warn_rows": 80_000, "fail_rows": 100_000},
+        }
+
+    def pack(periods, cmd=None, rows=0):
+        return {"periods": list(periods), "cmd": cmd, "expected_rows": rows}
+
+    def check_status(findings, name):
+        return next(f["status"] for f in findings if f["check"] == name)
+
+    # The normal path: one pack over both periods, every code requested once.
+    healthy = demo_plan([pack(["2000", "2001"], None, 300)])
+    assert all(f["status"] == "pass" for f in check_packing(healthy)), \
+        check_packing(healthy)
+    raise_on_fail(check_packing(healthy), "demo")
+
+    # COVERAGE. A period in no pack is never downloaded.
+    assert check_status(check_packing(demo_plan([pack(["2000"], None, 100)]),
+                                      ), "packing_coverage") == "fail"
+
+    # A period in two packs is downloaded twice: every code of it comes back
+    # requested twice, which is what the invariant actually measures.
+    doubled = demo_plan([pack(["2000", "2001"], None, 300),
+                         pack(["2000"], None, 100)])
+    assert check_status(check_packing(doubled), "packing_coverage") == "fail"
+
+    # The bisect path, done right: the two code subsets partition cmd.
+    split = demo_plan(
+        [pack(["2000"], ["4403"], 60_000), pack(["2000"], ["4407"], 40_000),
+         pack(["2001"], None, 200)],
+        counts={"2000": 100_000, "2001": 200}, total=100_200)
+    assert all(f["status"] in {"pass", "warn"}
+               for f in check_packing(split)), check_packing(split)
+    assert check_status(check_packing(split), "packing_coverage") == "pass"
+
+    # The bisect path, done wrong. BOTH failures are silent in production:
+    # a lost code just disappears from the file, and an overlapping subset
+    # duplicates rows in a file whose total still looks plausible.
+    lost = demo_plan([pack(["2000"], ["4403"], 60_000),
+                      pack(["2001"], None, 200)],
+                     counts={"2000": 60_000, "2001": 200})
+    assert check_status(check_packing(lost), "packing_coverage") == "fail"
+    overlap = demo_plan(
+        [pack(["2000"], ["4403", "4407"], 60_000),
+         pack(["2000"], ["4407"], 40_000), pack(["2001"], None, 200)],
+        counts={"2000": 100_000, "2001": 200}, total=100_200)
+    assert check_status(check_packing(overlap), "packing_coverage") == "fail"
+    # and this is the one that earns the whole check: today it would only be
+    # caught by `duplicates`, after the quota was spent.
+    assert "requested more than once" in next(
+        f for f in check_packing(overlap) if f["check"] == "packing_coverage"
+    )["detail"]
+
+    # A code nobody asked for, and counts describing the wrong periods.
+    stray = demo_plan([pack(["2000", "2001"], ["4403", "4407", "9999"], 300)])
+    assert check_status(check_packing(stray), "packing_coverage") == "fail"
+    wrong_counts = demo_plan([pack(["2000", "2001"], None, 300)],
+                             counts={"2000": 100, "2001": 200, "2002": 50})
+    assert check_status(check_packing(wrong_counts),
+                        "packing_coverage") == "fail"
+
+    # CEILING. Over the ceiling: the download will certainly be truncated.
+    over = demo_plan([pack(["2000", "2001"], None, 120_000)],
+                     counts={"2000": 120_000, "2001": 0}, total=120_000)
+    assert check_status(check_packing(over), "packing_ceiling") == "fail"
+
+    # Over the margin while still splittable: the packing did not do its job.
+    lazy = demo_plan([pack(["2000", "2001"], None, 90_000)],
+                     counts={"2000": 45_000, "2001": 45_000}, total=90_000)
+    assert check_status(check_packing(lazy), "packing_ceiling") == "fail"
+
+    # Over the margin and irreducible (one period, one code): the documented
+    # exception, so a warning and not a refusal.
+    irreducible = demo_plan(
+        [pack(["2000"], ["4403"], 90_000), pack(["2000"], ["4407"], 10_000),
+         pack(["2001"], None, 200)],
+        counts={"2000": 100_000, "2001": 200}, total=100_200)
+    assert check_status(check_packing(irreducible),
+                        "packing_ceiling") == "warn"
+    raise_on_fail(check_packing(irreducible), "demo")     # must not raise
+
+    # TOTAL. Pure arithmetic on the normal path, so a gap is a bug.
+    assert check_status(check_packing(demo_plan(
+        [pack(["2000", "2001"], None, 250)])), "packing_total") == "fail"
+    # On the bisect path each subset came from its own counting call, so the
+    # same gap only warns.
+    assert check_status(check_packing(demo_plan(
+        [pack(["2000"], ["4403"], 50), pack(["2000"], ["4407"], 40),
+         pack(["2001"], None, 200)],
+        counts={"2000": 100, "2001": 200})), "packing_total") == "warn"
+
+    # --- vintage comparison ---
+    before = [
+        {"period": "2000", "reporterCode": "251", "datasetChecksum": "a"},
+        {"period": "2001", "reporterCode": "251", "datasetChecksum": "b"},
+    ]
+    same = compare_vintage(before, before)
+    assert same == {"changed": [], "appeared": [], "vanished": [],
+                    "unchanged": 2, "revised": False}, same
+
+    moved = compare_vintage(before, [{**before[0], "datasetChecksum": "z"},
+                                     before[1]])
+    assert moved["revised"] and moved["changed"] == [("2000", "251")], moved
+    assert moved["unchanged"] == 1
+
+    appeared = compare_vintage(before, before + [
+        {"period": "2002", "reporterCode": "251", "datasetChecksum": "c"}])
+    assert appeared["revised"] and appeared["appeared"] == [("2002", "251")]
+    assert appeared["changed"] == [], appeared
+    vanished = compare_vintage(before, before[:1])
+    assert vanished["revised"] and vanished["vanished"] == [("2001", "251")]
+
+    # The verdict on a count gap. This is the promotion of the count checks
+    # from warn to fail, and the whole reason the vintage is re-read.
+    assert revision_finding(False, None)["status"] == "pass"
+    assert revision_finding(True, None)["status"] == "warn"
+    assert revision_finding(True, moved)["status"] == "warn"
+    # Same vintage upstream, different row count here: the bug is ours.
+    assert revision_finding(True, same)["status"] == "fail"
+    assert "preflight" in revision_finding(True, same)["detail"], \
+        "the fail must name the way out"
+
+    # --- areas: the public accessors agree with each other ---
+    all_areas, pseudo_set = area_codes(), pseudo_codes()
+    assert pseudo_set < all_areas, "pseudo codes must be a strict subset"
+    assert "490" in all_areas and "490" not in pseudo_set, "490 is Taiwan"
+    assert "0" in pseudo_set, "World is a pseudo area"
 
     print("comtrade_common: checks OK")
 

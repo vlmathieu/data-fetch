@@ -562,6 +562,27 @@ checks that it is caught.
 python workflow/scripts/build_comtrade_areas.py   # refresh the areas table
 ```
 
+### Checks on the plan
+
+Before anything is downloaded, and for free. Everything the preflight does
+runs on public endpoints, so this is the one place a problem is caught without
+having spent a thing — and until now it was also the only rule output nothing
+verified.
+
+| Check | What it refuses |
+|---|---|
+| `packing_coverage` | a requested (period, product) pair asked for zero or twice |
+| `packing_ceiling` | a pack planned at or above the ceiling, or above the margin while it could still have been split |
+| `packing_total` | the packs not adding up to the counted total |
+
+`packing_coverage` is the one that earns its keep. Two overlapping product
+subsets would duplicate every row they share — and that **is** caught further
+down, by `duplicates` on the delivered file, but only after the quota is gone
+and with a file to throw away. Here it costs nothing and fires before the
+first keyed call.
+
+A failing plan is **not written**, so no rule downstream can consume it.
+
 ### Checks on the downloaded data
 
 The self-checks above run on dataframes written by hand. These run on the real
@@ -590,26 +611,57 @@ only ever seen a good file proves nothing.
 | `periods_extra` | a period nobody asked for |
 | `periods_missing` | a period asked for and absent |
 | `iso3_unique` | one ISO3 under two reporter codes in one period |
+| `known_areas` | a code absent from the local areas table |
 | `duplicates` | the same declaration received twice |
+| `csv_roundtrip` | a CSV that does not read back to what was written |
+| `revision` | a count gap that our side caused |
 
 Plus one per derived file: the mirror and the EU aggregate must **conserve
 value**. The EU file in particular states its arithmetic out loud — raw total
 minus the intra-EU trade it deleted — and refuses to be written if the two
 sides differ.
 
-Each result lands in the sidecar under `checks`, so a run can be audited
-without reading the log.
+Each result lands in the sidecar under `checks` (and the plan's own in
+`plan.json`), so a run can be audited without reading the log.
+
+**The CSV is read back.** It is the artifact that goes to colleagues in Stata
+or R, and it used to be the one thing nothing verified — in particular the
+claim that polars quotes a field containing the separator, so that
+"China, Hong Kong SAR" survives a comma. Measured on 2026-10-26: **16,529
+fields** of the delivered CSV contain a comma and all of them come back whole.
+The check reports that number even when it passes, so a green light on a file
+with no such field is visible as the empty guarantee it is. Leading zeros are
+deliberately not compared: they are lost on reading a CSV back, which is why
+the parquet is canonical. The cost is reading the file once more — nothing on
+the 4.7 MB of a short run, a second or two on the ~150 MB the default config
+produces.
 
 **`fail` versus `warn`.** A `fail` stops the run: the file would answer a
 different question from the one asked. A `warn` is recorded and the run
-continues, and two of them are warnings on purpose:
+continues, and a few are warnings on purpose:
 
-- **the counts.** Comtrade rewrites history, so a gap between the preflight and
-  the download can be a perfectly legitimate revision rather than a bug.
-  Telling the two apart needs re-reading `datasetChecksum` after the download,
-  which is not done yet. Blocking a workflow on a revision would be worse than
-  warning about it. When a count warning appears, the sidecar's
-  `datasetChecksum` is what settles it.
+- **the counts, and then the verdict on them.** Comtrade rewrites history, so a
+  gap between the preflight and the download can be a legitimate revision
+  rather than a bug. So the counts themselves only warn — and then, *only when
+  they do*, the vintage is re-read on free public calls and `revision` settles
+  it:
+
+  | Observed | `revision` | Reading |
+  |---|---|---|
+  | the checksums moved | `warn` | Comtrade revised; the gap is **explained** |
+  | the checksums are identical | **`fail`** | same data upstream, different row count here: the bug is **ours** |
+  | the vintage cannot be read | `warn` | cannot tell, and saying so beats picking a side |
+
+  A healthy run spends none of those calls, because there is nothing to
+  explain. The check matters most on the **replay path**
+  (`--config run_id=…`), where the plan on disk can be months old.
+
+- **an area code the table does not know.** `resources/comtrade_areas.json` is
+  versioned on purpose, so it drifts; an area UNSD added since it was built is
+  neither filtered by `exclude_pseudo` nor classified by anything. That is a
+  **stale local table**, not a corrupt file: the data is fine, our reading of
+  it has fallen behind, and refusing a download because `resources/` is six
+  months old would be the wrong call. The warning names the fix.
 - **a forced classification.** Asking `HS` and getting a mix of `H0`, `H1` and
   `H2` is normal — `HS` means "the revision in force that year", and each
   declarant has its own. Asking `H5` and getting something else may or may not
@@ -627,16 +679,6 @@ continues, and two of them are warnings on purpose:
   rewriting submit / check / download by hand.
 - **other sources**: World Bank, FAOSTAT. Same contract: free preflight, dated
   file, sidecar.
-- **tell a Comtrade revision from a bug**: what is left of the download
-  checks, which otherwise landed (see Check above). The counts can only
-  **warn** today, because a gap between the preflight and the download is a
-  legitimate revision as often as it is a lost pack. Re-reading
-  `datasetChecksum` after the download would separate the two: checksum moved
-  means revision, checksum unchanged with a different count means a bug here,
-  and the warning could become a refusal. It costs a few free calls. One
-  caution for whoever picks it up: `totalRecords` from the availability
-  endpoint counts the whole reporter-period dataset, not our commodity
-  selection, so it is not a valid baseline — the preview counts are.
 - **compare with `comtradr`**:
   [comtradr](https://docs.ropensci.org/comtradr/index.html) (rOpenSci) wraps
   the same API in R, with `ct_get_data()`, `ct_commodity_lookup()`,

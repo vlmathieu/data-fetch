@@ -17,6 +17,8 @@ from pathlib import Path
 
 import polars as pl
 
+from comtrade_common import finding, raise_on_fail
+
 RESOURCES = Path(__file__).resolve().parents[2] / "resources"
 MEMBERSHIP_PATH = RESOURCES / "eu_membership.csv"
 
@@ -86,6 +88,14 @@ def guarded_sum(column: str) -> pl.Expr:
 # Keyed on the CODE columns and not the ISO ones, because include_desc: false
 # delivers no ISO columns at all.
 PSEUDO_SIDES = ("reporterCode", "partnerCode")
+
+# Sides the "is this code known at all?" check looks at, and the asymmetry
+# with PSEUDO_SIDES above is DELIBERATE. For the pseudo filter, partner2Code
+# is a trap: it holds 0 on every row when partner2 is not requested, and 0 is
+# World's code. Here 0 is simply a code the table KNOWS, so it cannot produce
+# a false positive -- while an unknown partner2 code would be a real blind
+# spot. Hence partner2Code belongs in this tuple and not in that one.
+AREA_SIDES = PSEUDO_SIDES + ("partner2Code",)
 
 
 def drop_pseudo(data: pl.DataFrame, pseudo: frozenset[str] | set[str]
@@ -349,62 +359,6 @@ ROW_KEYS = ("period", "flowCode", "reporterCode", "partnerCode",
 TOLERANCE = 1e-12
 
 
-def _finding(check: str, status: str, detail: str, **extra) -> dict:
-    """One check result.
-
-    Parameters
-    ----------
-    check : str
-        Short name, used as the key in the sidecar's 'checks' block.
-    status : {'pass', 'warn', 'fail'}
-        'fail' stops the run before anything is written; 'warn' is recorded
-        and the run continues.
-    detail : str
-        One line, readable in a log without any other context.
-    **extra
-        Numbers worth keeping in the sidecar ('expected', 'received'...).
-
-    Returns
-    -------
-    dict
-        {'check', 'status', 'detail', ...extra}.
-    """
-    return {"check": check, "status": status, "detail": detail, **extra}
-
-
-def raise_on_fail(findings: list[dict], label: str) -> None:
-    """Raises if any finding failed, naming every one of them.
-
-    Called BEFORE any file is written, so a non-conforming dataset is never
-    delivered. Snakemake deletes the `output:` of a failed job but keeps its
-    `log:`, so the diagnosis survives the failure.
-
-    Parameters
-    ----------
-    findings : list of dict
-        Output of check_download, check_mirror or check_eu.
-    label : str
-        What was checked, for the first line of the message.
-
-    Returns
-    -------
-    None
-
-    Raises
-    ------
-    RuntimeError
-        At least one finding has status 'fail'. The message lists them all,
-        not just the first.
-    """
-    failed = [f for f in findings if f["status"] == "fail"]
-    if failed:
-        lines = "\n".join(f"  - {f['check']}: {f['detail']}" for f in failed)
-        raise RuntimeError(
-            f"{label}: {len(failed)} check(s) failed, nothing written.\n"
-            f"{lines}"
-        )
-
-
 def _check_schema(data: pl.DataFrame, params: dict) -> list[dict]:
     """Are the columns the rest of the pipeline reads actually there?
 
@@ -425,13 +379,13 @@ def _check_schema(data: pl.DataFrame, params: dict) -> list[dict]:
         expected += list(REQUIRED_DESC)
     missing = [c for c in expected if c not in data.columns]
     if missing:
-        return [_finding(
+        return [finding(
             "schema", "fail",
             f"columns missing from the response: {missing}. The API changed, "
             f"or the request did not ask for what we think it did.",
             missing=missing,
         )]
-    return [_finding("schema", "pass",
+    return [finding("schema", "pass",
                      f"{len(expected)} required column(s) present, "
                      f"{data.width} in all")]
 
@@ -475,7 +429,7 @@ def _check_counts(data: pl.DataFrame, plan: dict) -> list[dict]:
     if gaps:
         worst = ", ".join(f"{p} {g['received']}/{g['expected']}"
                           for p, g in list(gaps.items())[:5])
-        findings.append(_finding(
+        findings.append(finding(
             "counts_period", "warn",
             f"{len(gaps)} period(s) differ from the preflight count: "
             f"{worst}. A Comtrade revision between preflight and download "
@@ -483,19 +437,19 @@ def _check_counts(data: pl.DataFrame, plan: dict) -> list[dict]:
             gaps=gaps,
         ))
     else:
-        findings.append(_finding(
+        findings.append(finding(
             "counts_period", "pass",
             f"{len(plan['counts'])} period(s) match the preflight count"))
 
     expected_total = plan["expected_rows_total"]
     if data.height != expected_total:
-        findings.append(_finding(
+        findings.append(finding(
             "counts_total", "warn",
             f"{data.height} rows received, {expected_total} counted by the "
             f"preflight ({data.height - expected_total:+d})",
             expected=expected_total, received=data.height))
     else:
-        findings.append(_finding(
+        findings.append(finding(
             "counts_total", "pass", f"{data.height} rows, as counted",
             expected=expected_total, received=data.height))
     return findings
@@ -535,11 +489,11 @@ def _check_request(data: pl.DataFrame, params: dict) -> list[dict]:
         stray = [c for c in delivered
                  if not (len(c) == 2 and c[0] == "H" and c[1].isdigit())]
         findings.append(
-            _finding("classification", "fail",
+            finding("classification", "fail",
                      f"HS asked, non-HS classification(s) delivered: {stray}",
                      delivered=delivered)
             if stray else
-            _finding("classification", "pass",
+            finding("classification", "pass",
                      f"HS -> {', '.join(delivered)} (the revision in force "
                      f"each year)", delivered=delivered)
         )
@@ -552,12 +506,12 @@ def _check_request(data: pl.DataFrame, params: dict) -> list[dict]:
         # forced-revision download has been seen.
         wrong = [c for c in delivered if c != requested]
         findings.append(
-            _finding("classification", "warn",
+            finding("classification", "warn",
                      f"{requested} asked, delivered: {delivered}. Unmeasured "
                      f"whether UNSD labels converted rows with the target "
                      f"revision or the source one.", delivered=delivered)
             if wrong else
-            _finding("classification", "pass", f"{requested} as asked",
+            finding("classification", "pass", f"{requested} as asked",
                      delivered=delivered)
         )
 
@@ -565,12 +519,12 @@ def _check_request(data: pl.DataFrame, params: dict) -> list[dict]:
     freq = sorted(data["freqCode"].unique().to_list())
     kind = sorted(data["typeCode"].unique().to_list())
     if freq != [params["freq"]] or kind != [FIXED["type"]]:
-        findings.append(_finding(
+        findings.append(finding(
             "frequency", "fail",
             f"freqCode {freq} / typeCode {kind} delivered, "
             f"['{params['freq']}'] / ['{FIXED['type']}'] asked"))
     else:
-        findings.append(_finding("frequency", "pass",
+        findings.append(finding("frequency", "pass",
                                  f"freqCode {freq}, typeCode {kind}"))
 
     # --- flow ---
@@ -581,12 +535,12 @@ def _check_request(data: pl.DataFrame, params: dict) -> list[dict]:
     got_flow = set(data["flowCode"].unique().to_list())
     extra_flow = sorted(got_flow - asked_flow)
     findings.append(
-        _finding("flow", "warn",
+        finding("flow", "warn",
                  f"flow code(s) delivered that were not asked for: "
                  f"{extra_flow} (asked: {sorted(asked_flow)})",
                  extra=extra_flow)
         if extra_flow else
-        _finding("flow", "pass", f"flowCode {sorted(got_flow)}")
+        finding("flow", "pass", f"flowCode {sorted(got_flow)}")
     )
 
     # --- products ---
@@ -594,12 +548,12 @@ def _check_request(data: pl.DataFrame, params: dict) -> list[dict]:
     got_cmd = set(data["cmdCode"].cast(pl.String).unique().to_list())
     extra_cmd = sorted(got_cmd - asked_cmd)
     findings.append(
-        _finding("cmd", "fail",
+        finding("cmd", "fail",
                  f"product code(s) delivered that were not asked for: "
                  f"{extra_cmd[:10]} ({len(extra_cmd)} in all). The selection "
                  f"did not reach the API as intended.", extra=extra_cmd)
         if extra_cmd else
-        _finding("cmd", "pass",
+        finding("cmd", "pass",
                  f"{len(got_cmd)} product code(s), all asked for")
     )
     return findings
@@ -632,18 +586,18 @@ def _check_periods(data: pl.DataFrame, params: dict) -> list[dict]:
     extra = sorted(got - asked)
     missing = sorted(asked - got)
     return [
-        _finding("periods_extra", "fail",
+        finding("periods_extra", "fail",
                  f"periods delivered that were not asked for: {extra}",
                  extra=extra)
         if extra else
-        _finding("periods_extra", "pass",
+        finding("periods_extra", "pass",
                  f"{len(got)} period(s), all asked for"),
 
-        _finding("periods_missing", "warn",
+        finding("periods_missing", "warn",
                  f"periods asked for and absent from the result: {missing}",
                  missing=missing)
         if missing else
-        _finding("periods_missing", "pass", "no period missing"),
+        finding("periods_missing", "pass", "no period missing"),
     ]
 
 
@@ -668,7 +622,7 @@ def _check_iso3(data: pl.DataFrame, params: dict) -> list[dict]:
         One finding, 'warn' on a collision.
     """
     if not params["include_desc"]:
-        return [_finding("iso3_unique", "pass",
+        return [finding("iso3_unique", "pass",
                          "skipped: no ISO column without include_desc")]
 
     collisions = (
@@ -682,11 +636,136 @@ def _check_iso3(data: pl.DataFrame, params: dict) -> list[dict]:
     if collisions.height:
         pairs = [f"{iso} in {period} ({n} codes)"
                  for period, iso, n in collisions.iter_rows()]
-        return [_finding("iso3_unique", "warn",
+        return [finding("iso3_unique", "warn",
                          f"possible double count: {'; '.join(pairs)}",
                          collisions=pairs)]
-    return [_finding("iso3_unique", "pass",
+    return [finding("iso3_unique", "pass",
                      "no ISO3 under two reporter codes in one period")]
+
+
+def _check_known_areas(data: pl.DataFrame) -> list[dict]:
+    """Does the areas table know every code that was delivered?
+
+    `resources/comtrade_areas.json` is versioned on purpose, so it drifts. An
+    area UNSD added since the last build_comtrade_areas.py run is in neither
+    set: not in pseudo_codes(), so exclude_pseudo leaves it in, and not in the
+    table, so nothing knows what it is. It would be treated as a country in
+    silence. This is the only thing that would say otherwise.
+
+    'warn' and not 'fail', and the reason matters: an unknown code does not
+    describe a corrupt file, it describes a STALE LOCAL TABLE. The data is
+    fine, our classification of it has fallen behind, and refusing a download
+    because resources/ is six months old would be the wrong call.
+
+    Parameters
+    ----------
+    data : polars dataframe
+        Rows as received, before any filtering.
+
+    Returns
+    -------
+    list of dict
+        One finding, 'warn' naming the unknown codes and the remedy.
+    """
+    from comtrade_common import area_codes  # noqa: PLC0415
+
+    known = area_codes()
+    sides = [c for c in AREA_SIDES if c in data.columns]
+    unknown: dict[str, list[str]] = {}
+    for side in sides:
+        codes = set(data[side].cast(pl.String).unique().to_list()) - known
+        if codes:
+            unknown[side] = sorted(codes)
+
+    if unknown:
+        return [finding(
+            "known_areas", "warn",
+            f"code(s) absent from resources/comtrade_areas.json: {unknown}. "
+            f"UNSD has probably added an area since the table was built: it "
+            f"was NOT filtered by exclude_pseudo and nothing knows whether it "
+            f"is a country. Refresh with `python "
+            f"workflow/scripts/build_comtrade_areas.py` (public, no key).",
+            unknown=unknown)]
+    return [finding("known_areas", "pass",
+                    f"every code on {len(sides)} side(s) is in the table",
+                    known_total=len(known))]
+
+
+def check_csv(path: str, data: pl.DataFrame, separator: str) -> list[dict]:
+    """Reads the delivered CSV back and compares it to what was written.
+
+    The CSV is the artifact that goes to colleagues in Stata or R, and until
+    now it was the one nothing verified. Two claims about it were written in
+    prose and never checked -- in particular that polars quotes a field
+    containing the separator, so that "China, Hong Kong SAR" survives a comma.
+    That is exactly the kind of claim that produced the last two bugs here.
+
+    Read back with every column as a string: this checks the TRANSPORT, not
+    the types. Leading zeros are deliberately NOT compared -- they are lost on
+    reading a CSV back, which is known, documented, and why the parquet is the
+    canonical artifact. A strict equality would fail on intended behaviour.
+
+    Parameters
+    ----------
+    path : str
+        The CSV just written.
+    data : polars dataframe
+        The frame it was written from.
+    separator : str
+        The separator used, from the config's csv_sep.
+
+    Returns
+    -------
+    list of dict
+        One finding. 'fail' if the file does not read back to the same shape
+        or the same total; its detail always says how many fields contained
+        the separator, so a vacuous pass is visible as such.
+    """
+    # How many fields would need quoting at all. Reported even on a pass: if
+    # this is 0, the read-back proved nothing about quoting, and the detail
+    # says so rather than implying a guarantee.
+    quoted = sum(
+        data.select(
+            pl.col(c).cast(pl.String).str.contains(separator, literal=True)
+            .sum()
+        ).item() or 0
+        for c, dtype in data.schema.items() if dtype == pl.String
+    )
+
+    try:
+        back = pl.read_csv(path, separator=separator, infer_schema_length=0)
+    except Exception as exc:                          # noqa: BLE001
+        return [finding("csv_roundtrip", "fail",
+                        f"the CSV just written cannot be read back: "
+                        f"{type(exc).__name__}: {exc}")]
+
+    if (back.height, back.width) != (data.height, data.width):
+        return [finding(
+            "csv_roundtrip", "fail",
+            f"the CSV reads back as {back.height} rows x {back.width} columns "
+            f"instead of {data.height} x {data.width}: fields were shifted, "
+            f"which a broken quote around one of the {quoted} value(s) "
+            f"containing '{separator}' would do.",
+            rows=back.height, columns=back.width, quoted_fields=quoted)]
+
+    if "primaryValue" in data.columns:
+        written = data["primaryValue"].sum()
+        read = back["primaryValue"].cast(pl.Float64, strict=False).sum()
+        if not _conserved(written, read):
+            return [finding(
+                "csv_roundtrip", "fail",
+                f"primaryValue sums to {read} in the CSV against {written} in "
+                f"the frame: values were truncated or shifted.",
+                expected=written, received=read)]
+
+    return [finding(
+        "csv_roundtrip", "pass",
+        f"{back.height} rows x {back.width} columns read back identical, "
+        + (f"{quoted} field(s) containing '{separator}' included"
+           if quoted else
+           f"but NO field contained '{separator}', so the quoting was not "
+           f"exercised"),
+        rows=back.height, columns=back.width, quoted_fields=quoted)]
 
 
 def _check_duplicates(data: pl.DataFrame) -> list[dict]:
@@ -709,7 +788,7 @@ def _check_duplicates(data: pl.DataFrame) -> list[dict]:
             data.group_by(keys).len().filter(pl.col("len") > 1)
             .sort("len", descending=True).head(3)
         )
-        return [_finding(
+        return [finding(
             "duplicates", "fail",
             f"{extra} surplus row(s) on the declaration key: the same "
             f"declaration was received more than once, which double counts it "
@@ -717,7 +796,7 @@ def _check_duplicates(data: pl.DataFrame) -> list[dict]:
             f"{worst.to_dicts()}",
             extra_rows=extra, keys=keys,
         )]
-    return [_finding("duplicates", "pass", "no duplicate declaration",
+    return [finding("duplicates", "pass", "no duplicate declaration",
                      extra_rows=0, keys=keys)]
 
 
@@ -754,6 +833,7 @@ def check_download(data: pl.DataFrame, plan: dict) -> list[dict]:
     findings += _check_request(data, params)
     findings += _check_periods(data, params)
     findings += _check_iso3(data, params)
+    findings += _check_known_areas(data)
     findings += _check_duplicates(data)
     return findings
 
@@ -798,11 +878,11 @@ def check_mirror(source: pl.DataFrame, mirror: pl.DataFrame) -> list[dict]:
                     .sum())
         received = mirror[column].sum()
         findings.append(
-            _finding(f"mirror_{suffix}", "pass",
+            finding(f"mirror_{suffix}", "pass",
                      f"{role} value conserved: {received}",
                      expected=expected, received=received)
             if _conserved(expected, received) else
-            _finding(f"mirror_{suffix}", "fail",
+            finding(f"mirror_{suffix}", "fail",
                      f"{role} value NOT conserved: {received} in the mirror "
                      f"against {expected} in the {flow} rows of the source. "
                      f"Rows were lost in the group_by or the join.",
@@ -841,11 +921,11 @@ def check_eu(source: pl.DataFrame, result: pl.DataFrame, report: dict
     expected = float(total or 0.0) - float(intra or 0.0)
     received = result["primaryValue"].sum()
     return [
-        _finding("eu_conserved", "pass",
+        finding("eu_conserved", "pass",
                  f"value conserved: {received} = {total} - {intra}",
                  expected=expected, received=received)
         if _conserved(expected, received) else
-        _finding("eu_conserved", "fail",
+        finding("eu_conserved", "fail",
                  f"value NOT conserved: {received} in the EU file against "
                  f"{expected} expected ({total} raw - {intra} intra-EU). The "
                  f"aggregation created or lost value.",
@@ -1103,7 +1183,8 @@ def _demo() -> None:
     assert {f["check"] for f in findings} == {
         "schema", "counts_period", "counts_total", "classification",
         "frequency", "flow", "cmd", "periods_extra", "periods_missing",
-        "iso3_unique", "duplicates"}, {f["check"] for f in findings}
+        "iso3_unique", "known_areas", "duplicates"}, \
+        {f["check"] for f in findings}
     # HS delivering several revisions is NORMAL, and the pass says which.
     assert "H1, H2" in next(f for f in findings
                             if f["check"] == "classification")["detail"]
@@ -1231,6 +1312,74 @@ def _demo() -> None:
          "partnerISO": "USA", "period": "2015", "primaryValue": 5.0},
     ]), members)
     assert eu_report["intra_eu_value"] == 12.0, eu_report
+
+    # --- known areas: the drift of a deliberately versioned table ---
+    # The healthy fixture uses real codes (251 FRA, 276 DEU, 56 BEL, 0 World),
+    # so it must pass against the real table.
+    assert _check_known_areas(good)[0]["status"] == "pass"
+
+    # A code UNSD could add tomorrow: not in the table, so exclude_pseudo
+    # would NOT filter it and nothing would know whether it is a country.
+    stray_area = trade([row(partnerCode=999_999)])
+    found = _check_known_areas(stray_area)
+    assert found[0]["status"] == "warn", found
+    assert found[0]["unknown"] == {"partnerCode": ["999999"]}, found[0]
+    # A warning, never a refusal: the data is fine, our table is stale.
+    raise_on_fail(found, "demo")
+
+    # partner2Code IS inspected here, unlike in the pseudo filter: its 0 is a
+    # known code, so it cannot false-alarm, while an unknown value would be a
+    # real blind spot.
+    assert "partner2Code" in AREA_SIDES and "partner2Code" not in PSEUDO_SIDES
+    assert _check_known_areas(
+        trade([row(partner2Code=999_999)]))[0]["status"] == "warn"
+
+    # --- the CSV read back ---
+    import tempfile                                   # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory() as folder:
+        # A label holding the separator, which is the claim being tested:
+        # polars must quote it, and it must come back whole.
+        tricky = trade([row(partnerDesc="China, Hong Kong SAR"),
+                        row(partnerCode=56, partnerDesc="Belgium")])
+        path = f"{folder}/t.csv"
+        tricky.write_csv(path, separator=",")
+        found = check_csv(path, tricky, ",")
+        assert found[0]["status"] == "pass", found
+        # The pass must say the quoting was actually exercised, otherwise it
+        # is a vacuous green light.
+        assert found[0]["quoted_fields"] >= 1, found[0]
+        assert "containing ','" in found[0]["detail"], found[0]["detail"]
+
+        # No field holds the separator: the check says so instead of implying
+        # a guarantee it did not test.
+        plain = trade([row(partnerDesc="Germany")])
+        plain.write_csv(f"{folder}/p.csv", separator=",")
+        found = check_csv(f"{folder}/p.csv", plain, ",")
+        assert found[0]["status"] == "pass" and found[0]["quoted_fields"] == 0
+        assert "NO field contained" in found[0]["detail"]
+
+        # A truncated file: rows went missing between writing and reading.
+        lines = Path(path).read_text().splitlines()
+        Path(f"{folder}/short.csv").write_text("\n".join(lines[:-1]) + "\n")
+        found = check_csv(f"{folder}/short.csv", tricky, ",")
+        assert found[0]["status"] == "fail", found
+        assert "rows" in found[0]["detail"]
+
+        # A value quietly altered: same shape, different total.
+        altered = "\n".join(
+            line.replace(",100.0", ",1.0") if i else line
+            for i, line in enumerate(lines)
+        ) + "\n"
+        Path(f"{folder}/altered.csv").write_text(altered)
+        found = check_csv(f"{folder}/altered.csv", tricky, ",")
+        assert found[0]["status"] == "fail", found
+        assert "primaryValue" in found[0]["detail"]
+
+        # Not a CSV at all.
+        Path(f"{folder}/junk.csv").write_text('a,b\n"unclosed,1\n')
+        junk = check_csv(f"{folder}/junk.csv", tricky, ",")
+        assert junk[0]["status"] == "fail", junk
 
     print("comtrade_polars: checks OK")
 
