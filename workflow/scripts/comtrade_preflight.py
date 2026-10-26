@@ -43,6 +43,7 @@ from comtrade_common import (  # noqa: E402
     selection,
     vintage,
 )
+from comtrade_progress import Progress, retry_reporter  # noqa: E402
 
 logging.basicConfig(
     filename=snakemake.log[0],  # noqa: F821
@@ -52,16 +53,17 @@ logging.basicConfig(
 )
 
 
-def count_rows(params: dict, period: str, cmd: list[str] | None = None) -> int:
+def count_rows(params: dict, period: str, cmd: list[str] | None = None,
+               on_retry=None) -> int:
     """Free count, one period, through the public endpoint."""
     fn = (comtradeapicall.previewFinalData if params["data_type"] == "final"
           else comtradeapicall.previewTarifflineData)
-    df = call(fn, label=f"count {period}", countOnly=True,
+    df = call(fn, label=f"count {period}", countOnly=True, on_retry=on_retry,
               **selection(params, period, cmd))
     return int(df["count"].iloc[0])
 
 
-def build_plan(params: dict) -> dict:
+def build_plan(params: dict, progress: Progress) -> dict:
     periods = params["period"]
     warn_rows, fail_rows = caps(params)
     warnings: list[str] = []
@@ -69,7 +71,15 @@ def build_plan(params: dict) -> dict:
 
     counts: dict[str, int] = {}
     for period in periods:
-        counts[period] = count_rows(params, period)
+        # Announced BEFORE the call: the whole point is that the display says
+        # what is in flight rather than what last finished. `progress` is
+        # never None -- a disabled one no-ops, so nothing here has to branch.
+        progress.step(f"counting {period}", None)
+        counts[period] = count_rows(
+            params, period,
+            on_retry=retry_reporter(progress, f"count {period}",
+                                    logging.warning))
+        progress.done(1)
         calls += 1
         logging.info("count %s: %d rows", period, counts[period])
         if counts[period] == 0:
@@ -91,8 +101,14 @@ def build_plan(params: dict) -> dict:
                 f"period {period}: {expected} rows >= {warn_rows}, "
                 f"split on the codes."
             )
+            progress.note(f"splitting {period} on the codes")
             for codes, n in bisect_codes(
-                params["cmd"], lambda cs: count_rows(params, period, cs), warn_rows
+                params["cmd"],
+                lambda cs: count_rows(
+                    params, period, cs,
+                    on_retry=retry_reporter(progress, f"count {period}",
+                                            logging.warning)),
+                warn_rows,
             ):
                 packs.append({"periods": [period], "cmd": codes,
                               "expected_rows": n})
@@ -101,6 +117,9 @@ def build_plan(params: dict) -> dict:
             packs.append({"periods": pack, "cmd": None,
                           "expected_rows": expected})
 
+    # No bar of its own: batched ten periods at a time, so the number of calls
+    # is not known in advance and a second bar would be noise.
+    progress.step("recording the data vintage", None)
     rows, status = vintage(params, periods, comtradeapicall)
 
     return {
@@ -119,7 +138,18 @@ def build_plan(params: dict) -> dict:
     }
 
 
-plan = build_plan(snakemake.params["params"])
+params = snakemake.params["params"]
+periods = params["period"]
+with Progress(
+    total=len(periods),
+    desc=f"Preflight {periods[0]}-{periods[-1]}",
+    # No leading space and no scaling: 28 periods is a small number, so
+    # '18/28 periods' reads better than '18.0/28.0', and tqdm inverts the rate
+    # below one unit per second -- '5.1s/period', not '5.1s/ periods'.
+    unit="period",
+    unit_scale=False,
+) as progress:
+    plan = build_plan(params, progress)
 
 # Checks on the plan BEFORE it is written. Everything here cost free calls, so
 # this is the one place in the repo where a problem can be caught without

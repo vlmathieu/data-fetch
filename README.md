@@ -532,14 +532,56 @@ cap to 2.5M, but `downloadAsyncFinalDataRequest` loops with no timeout and no
 maximum number of attempts, lets the server pick the file name (so no `output:`
 can be declared), and crashes with a `TypeError` if the submission fails.
 
+## Watching a run
+
+Long requests are the normal case — the default config is roughly two and a
+half minutes of free counting followed by ten minutes of downloading — so both
+rules that loop over API calls show where they are:
+
+```
+Comtrade 1996-2023  48%|█████████▌     | 260k/540k rows [04:38<05:02, 936 rows/s]
+  ↳ pack 5/9  2011-2013   61,208 expected   01:12 elapsed
+```
+
+Two lines, two different jobs, and the split is deliberate:
+
+- **the bar** advances by the rows **actually received** when a call lands. It
+  is never extrapolated, and it is weighted by rows rather than by calls:
+  packs run from 20,641 to 75,120 rows, so counting calls would show 11% for
+  each, which would be false.
+- **the ticker** is redrawn every half second. One download call takes about a
+  minute, so the bar itself can only move nine times on the default config;
+  without a second line that moves on its own, those gaps look like a crash.
+
+A bar that crept forward on an estimate during a call would keep creeping when
+the call was stuck — exactly when you need it to be truthful. So the estimate
+lives in the ETA, which tqdm computes from measured throughput, and the
+liveness lives in the ticker.
+
+A retry shows up there too, which used to be invisible: on an HTTP 429 the
+retry logic waits 5, then 10, 20 and 40 seconds, and said nothing at all.
+
+```
+  ↳ pack 5/9  2011-2013   FAILED attempt 3/5, retrying in 20s (HTTP 429)   01:52
+```
+
+**Piped or redirected, all of this switches off.** The bar needs a terminal;
+written to a file it would emit one line per redraw, so the display disables
+itself and the per-call lines in `workflow/logs/` remain the record. Nothing
+is lost, and a run under CI or an agent is unaffected.
+
+`comtrade_mirror` and `comtrade_eu` have no bar: they make a single pass over
+a file already on disk, so there is nothing to count.
+
 ## Check
 
-No test suite. Two runnable self-checks instead, both free of the API, of conda
-and of the network, so they still work when the environment does not:
+No test suite. Three runnable self-checks instead, all free of the API, of
+conda and of the network, so they still work when the environment does not:
 
 ```zsh
 python workflow/scripts/comtrade_common.py   # hash, packing, areas, refusals
 python workflow/scripts/comtrade_polars.py   # EU aggregation, download checks
+python workflow/scripts/comtrade_progress.py # progress bar, retry line
 ```
 
 The first verifies that the hash ignores list order, case and types but not a

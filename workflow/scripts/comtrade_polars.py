@@ -277,8 +277,18 @@ def aggregate_eu(data: pl.DataFrame, members: pl.DataFrame
     intra = intra_rows.height
     # The value deleted, not only the rows: it is the right-hand side of the
     # conservation equation check_eu verifies.
-    intra_value = (intra_rows["primaryValue"].sum()
-                   if "primaryValue" in data.columns else None)
+    #
+    # Guarded the way guarded_sum is, and for two reasons that happen to
+    # agree. The repo's rule is that nulls stay null, so an all-null column has
+    # no sum rather than a sum of zero. And polars 1.33.1, which is what the
+    # rule env pins, RAISES on sum() over a Null dtype where newer polars
+    # returns a value -- found by running this module's self-check inside the
+    # conda env instead of the base interpreter.
+    intra_value = None
+    if "primaryValue" in data.columns:
+        values = intra_rows["primaryValue"]
+        if values.null_count() < values.len():
+            intra_value = values.sum()
     data = data.filter(~both).drop("reporter_is_eu", "partner_is_eu", "year")
 
     keys = [c for c in EU_KEYS if c in data.columns]

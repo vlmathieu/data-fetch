@@ -30,6 +30,13 @@ at least copy its dtypes.
 ## Commands
 
 ```zsh
+# ALWAYS run these with the RULE env's python, not the base one:
+#   .snakemake/conda/<hash>_/bin/python workflow/scripts/<module>.py
+# The base interpreter has a NEWER polars, and a check that passes there can
+# fail in the env the rules actually use. That is not hypothetical: polars
+# 1.33.1 raises on sum() over a Null dtype where 1.39.3 returns a value, and
+# the base run was green while the rule env crashed.
+python workflow/scripts/comtrade_progress.py      # bar lifecycle, retry line
 python workflow/scripts/comtrade_common.py        # hash, packing, areas, refusals, plan checks
 python workflow/scripts/comtrade_polars.py        # EU aggregation, download checks
 python workflow/scripts/build_comtrade_areas.py   # refresh resources/, public, no key
@@ -95,6 +102,12 @@ contract is at the top of `rules/common.smk`.
   the `call()` wrapper, `selection()`, `pack_periods()`, `bisect_codes()`, and
   the areas table (`_load_areas()`, `resolve_areas()`, `pseudo_codes()`, stdlib
   `json` only).
+- `comtrade_progress.py` is imported **by the scripts only**: it holds the
+  progress display, and `tqdm` lives in the rule env, not in the base env the
+  Snakefile runs in. Same boundary as polars. `Progress` is a context manager
+  because its ticker runs in a thread that must stop even when the loop
+  raises; `tqdm` is imported INSIDE `__enter__`, so the disabled path needs
+  nothing at all and the self-check runs without the dependency.
 - `comtrade_polars.py` is imported **by the scripts only**, inside the conda
   env, so polars is allowed. It holds `guarded_sum()` (shared with the mirror),
   the EU aggregation (`eu_membership()`, `aggregate_eu()`), and the checks that
@@ -275,6 +288,37 @@ All found by running things, not by rereading them.
   It defaults to the free value and is in `_NOT_IN_HASH`, because the same
   selection pulled on either key is the same data. Setting it above the real
   ceiling truncates the response with no error and the guard never fires.
+- **The progress bar is driven by a CLOCK, not by completed calls**, and that
+  is the whole design. Measured ~940 rows/s, so the default config pulls
+  539,660 rows in 9 calls of about a minute: a bar advancing only when a call
+  lands would move 9 times in ten minutes and sit frozen between, which reads
+  as a crash. Hence two lines — the bar (truth, advances by rows RECEIVED) and
+  a ticker thread at 0.5s (liveness). Do not "improve" this by extrapolating
+  the bar during a call: it would keep creeping while a call is stuck, exactly
+  when it must be honest.
+- **Everything progress-related switches off when stderr is not a TTY.**
+  Piped, tqdm emits one LINE per redraw: over a thousand lines on a ten-minute
+  run. `Progress(enabled=...)` defaults to `sys.stderr.isatty()`, and the
+  disabled path imports no tqdm, starts no thread and draws nothing, while the
+  `log:` keeps every per-call line. Verified: a piped preflight produces zero
+  bar characters. The bar never goes to the `log:` either — a carriage return
+  in a log file is unreadable.
+- **`call()` was silent for 75 seconds on a 429** (5+10+20+40), the one moment
+  this workflow genuinely looks hung. It now takes `on_retry`, which
+  `comtrade_progress.retry_reporter` sends to both the ticker and the log.
+  `_backoff()` is a separate function only so the self-check can assert the
+  whole ladder without sleeping through it.
+- **`requests` must stay in `envs/comtrade.yaml`.** `comtradeapicall` imports
+  it (`GroupCalc`) and never declared it, so the env only ever worked because
+  Snakemake leaked the parent environment's copy into the rule. Found on
+  2026-10-26 by rebuilding the env: `import comtradeapicall` then died on
+  `ModuleNotFoundError`. The old env had no `requests` either — it was
+  accidental all along.
+- **Touching `envs/comtrade.yaml` trips the `software-env` rerun trigger**, and
+  it cascades: a bare `snakemake` on an existing run_id then wants to redo
+  `comtrade_download`, which SPENDS QUOTA. Measured on 2026-10-26: the reason
+  reads `software environment definition has changed since last execution`.
+  Dry-run first, then `--rerun-triggers mtime`, which reports nothing to do.
 - **`comtradeapicall` returns pandas.** Convert with `pl.from_pandas()` at the
   boundary, in the scripts; everything else is polars.
 - **`period.stop` is INCLUSIVE.** A deliberate correction of the `stop - 2` in

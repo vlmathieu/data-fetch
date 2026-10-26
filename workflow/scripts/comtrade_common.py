@@ -608,8 +608,30 @@ def plan(cfg: dict, run_id: str, out_dir: str = "data/comtrade") -> dict:
 
 # --- call wrapper -----------------------------------------------------------
 
+def _backoff(attempt: int, base_delay: float) -> float:
+    """Seconds to wait before the next attempt, doubling each time.
+
+    Split out of call() so the self-check can assert the whole ladder
+    ([5, 10, 20, 40] on the defaults) without sleeping through 75 seconds of
+    it.
+
+    Parameters
+    ----------
+    attempt : int
+        Which attempt just failed, 0-based.
+    base_delay : float
+        Wait after the first failure.
+
+    Returns
+    -------
+    float
+        base_delay * 2 ** attempt.
+    """
+    return base_delay * 2 ** attempt
+
+
 def call(fn, *args, attempts: int = 5, base_delay: float = 5.0,
-         label: str = "", **kwargs):
+         label: str = "", on_retry=None, **kwargs):
     """Calls a comtradeapicall function, treating a None return as a failure.
 
     Required, because the package swallows HTTP errors. getPreviewData prints
@@ -635,6 +657,11 @@ def call(fn, *args, attempts: int = 5, base_delay: float = 5.0,
     label : str, optional
         Short description of the call ('count 1996', 'pack 2001-2004'),
         included in the error message to say which period failed.
+    on_retry : callable, optional
+        on_retry(attempt, attempts, delay, detail), called before each wait.
+        Without it a 429 sleeps 5+10+20+40 = 75 seconds in complete silence,
+        which is the only moment this workflow genuinely looks hung. The
+        caller uses it to say so on screen and in the log.
 
     Returns
     -------
@@ -659,7 +686,10 @@ def call(fn, *args, attempts: int = 5, base_delay: float = 5.0,
         except Exception as exc:                      # noqa: BLE001
             detail = f"{type(exc).__name__}: {exc}"
         if attempt < attempts - 1:
-            time.sleep(base_delay * 2 ** attempt)     # 5s, 10s, 20s, 40s
+            delay = _backoff(attempt, base_delay)     # 5s, 10s, 20s, 40s
+            if on_retry is not None:
+                on_retry(attempt + 1, attempts, delay, detail)
+            time.sleep(delay)
     raise RuntimeError(f"failed after {attempts} attempts [{label}]: {detail}")
 
 
@@ -1452,6 +1482,32 @@ def _demo() -> None:
     refused({**base, "freq": "M"}, ValueError)
     # Needs the correspondence tables of the `mapping` job.
     refused({**base, "hs_revision": "auto"}, NotImplementedError)
+
+    # --- the retry backoff, and saying so ---
+    # The ladder, asserted without sleeping through 75 seconds of it: that is
+    # the whole reason _backoff is a function of its own.
+    assert [_backoff(i, 5.0) for i in range(4)] == [5, 10, 20, 40]
+    assert _backoff(0, 0) == 0, "base_delay 0 must not wait"
+
+    # The callback fires once per WAIT, so four times over five attempts --
+    # there is no wait after the last one. base_delay 0 keeps the check fast.
+    seen: list[tuple] = []
+    try:
+        call(lambda: None, attempts=5, base_delay=0, label="demo",
+             on_retry=lambda *args: seen.append(args))
+    except RuntimeError as exc:
+        assert "failed after 5 attempts" in str(exc), exc
+    else:
+        raise AssertionError("a function returning None must fail")
+    assert len(seen) == 4, seen
+    assert [a[0] for a in seen] == [1, 2, 3, 4], "attempts are 1-based"
+    assert all(a[1] == 5 for a in seen), "the total is passed through"
+    assert "None response" in seen[0][3], seen[0][3]
+
+    # A call that succeeds never touches the callback.
+    untouched: list[tuple] = []
+    assert call(lambda: "ok", on_retry=lambda *a: untouched.append(a)) == "ok"
+    assert untouched == []
 
     # --- checks on the plan ---
     # Plans written by hand, because the real plan.json on disk has ONE pack

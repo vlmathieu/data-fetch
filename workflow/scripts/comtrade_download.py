@@ -43,6 +43,7 @@ from comtrade_polars import (  # noqa: E402
     check_download,
     drop_pseudo,
 )
+from comtrade_progress import Progress, retry_reporter  # noqa: E402
 
 logging.basicConfig(
     filename=snakemake.log[0],  # noqa: F821
@@ -75,7 +76,7 @@ except KeyError:
     ) from None
 
 
-def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
+def fetch_pack(params: dict, pack: dict, on_retry=None) -> pl.DataFrame:
     """One API call per pack, with a check against the ceiling.
 
     getFinalData truncates WITHOUT error at the ceiling of your subscription
@@ -90,7 +91,8 @@ def fetch_pack(params: dict, pack: dict) -> pl.DataFrame:
 
     frame = call(
         fn, APIKEY, label=label, includeDesc=params["include_desc"],
-        format_output="JSON", **selection(params, period, pack["cmd"]),
+        format_output="JSON", on_retry=on_retry,
+        **selection(params, period, pack["cmd"]),
     )
     rows = len(frame)
 
@@ -141,11 +143,33 @@ plan = json.loads(Path(snakemake.input[0]).read_text(encoding="utf-8"))
 params = plan["params_resolved"]
 
 frames, warnings = [], list(plan["warnings"])
-for pack in plan["packs"]:
-    frame = fetch_pack(params, pack)
-    if frame.height:
-        frames.append(frame)
-    else:
+
+# The bar is driven by rows and not by calls, because the packs are not the
+# same size: on the default config they run from 20,641 to 75,120 rows, so
+# counting calls would show 11% for each, which would be false. The total comes
+# from the counts the preflight already paid for.
+#
+# And it is the TICKER, refreshed every half second, that makes this usable:
+# one call takes about a minute, so the bar itself can only move 9 times on the
+# default config. See comtrade_progress for why that split matters.
+with Progress(
+    total=plan["expected_rows_total"],
+    desc=f"Comtrade {params['period'][0]}-{params['period'][-1]}",
+) as progress:
+    for number, pack in enumerate(plan["packs"], 1):
+        periods = ",".join(pack["periods"])
+        label = f"pack {number}/{len(plan['packs'])}  {periods}"
+        progress.step(label, pack["expected_rows"])
+        frame = fetch_pack(
+            params, pack,
+            on_retry=retry_reporter(progress, label, logging.warning))
+        # Advanced by what was RECEIVED, never by what was expected: if
+        # Comtrade revised upstream, the bar tells the truth and the counts
+        # check reports the gap.
+        progress.done(frame.height)
+        if frame.height:
+            frames.append(frame)
+            continue
         # Only reachable when the preflight itself counted 0 for every period
         # of the pack, which it has already warned about. An unexpected empty
         # pack raises inside fetch_pack instead.
